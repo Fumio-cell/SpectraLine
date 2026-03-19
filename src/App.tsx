@@ -3,7 +3,7 @@ import './App.css';
 import LeftPanel from './components/LeftPanel';
 import Viewer from './components/Viewer';
 import Inspector from './components/Inspector';
-import Header from './components/Header';
+import { Header } from './components/Header';
 import { AppEngine } from './core/engine';
 import { useAppStore } from './store/useAppStore';
 import { openLemonSqueezyCheckout, signInWithGoogle } from './lib/commercial';
