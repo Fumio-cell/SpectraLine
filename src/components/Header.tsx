@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { supabase, openLemonSqueezyCheckout } from '../lib/commercial';
-import { LogIn, LogOut, Zap, Activity } from 'lucide-react';
+import { LogIn, LogOut, Zap, Activity, Info, X } from 'lucide-react';
 
 export const Header: React.FC = () => {
     const [user, setUser] = useState<any>(null);
     const [isPro, setIsPro] = useState(false);
+    const [showInfo, setShowInfo] = useState(false);
 
     useEffect(() => {
         const client = supabase;
@@ -67,6 +68,9 @@ export const Header: React.FC = () => {
                 </div>
                 <div className="app-separator">/</div>
                 <div className="app-name">SpectraLine</div>
+                <button onClick={() => setShowInfo(true)} className="info-btn">
+                    <Info className="w-4 h-4" />
+                </button>
             </div>
 
             <div className="header-right">
@@ -221,7 +225,61 @@ export const Header: React.FC = () => {
                     color: #fff;
                     background: rgba(255, 255, 255, 0.1);
                 }
-            `}</style>
+            `}
+                .info-modal-overlay {
+                    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+                    background: rgba(0,0,0,0.75); backdrop-filter: blur(8px);
+                    display: flex; align-items: center; justify-content: center; z-index: 99999;
+                }
+                .info-modal {
+                    background: #111827; border: 1px solid rgba(255,255,255,0.1);
+                    border-radius: 16px; padding: 32px; max-width: 600px;
+                    width: 90%; max-height: 85vh; overflow-y: auto;
+                    box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+                    position: relative;
+                    text-align: left;
+                }
+                .info-modal h2 { margin-top: 0; color: #f8fafc; font-size: 1.5rem; }
+                .info-modal h3 { color: #38bdf8; font-size: 0.85rem; margin-bottom: 24px; font-weight: 600; }
+                .info-modal p { color: #cbd5e1; line-height: 1.6; font-size: 0.9rem; margin-bottom: 12px; }
+                .info-modal ul { color: #cbd5e1; font-size: 0.85rem; padding-left: 20px; list-style-type: none; margin:0; padding:0; }
+                .info-modal li { margin-bottom: 8px; font-weight: 500; color: #94a3b8; }
+                .info-close {
+                    position: absolute; top: 16px; right: 16px;
+                    background: transparent; border: none; color: #64748b;
+                    cursor: pointer; padding: 6px; border-radius: 6px; transition: all 0.2s;
+                }
+                .info-close:hover { color: #f8fafc; background: rgba(255,255,255,0.1); }
+                .info-btn {
+                    background: transparent; border: none; color: #64748b; cursor: pointer;
+                    display: flex; align-items: center; justify-content: center;
+                    margin-left: 12px; transition: color 0.2s;
+                }
+                .info-btn:hover { color: #f8fafc; }
+    
+            </style>
+        
+            {showInfo && (
+                <div className="info-modal-overlay" onClick={() => setShowInfo(false)}>
+                    <div className="info-modal" onClick={e => e.stopPropagation()}>
+                        <button className="info-close" onClick={() => setShowInfo(false)}><X className="w-5 h-5"/></button>
+                        <h2>SpectraLine</h2>
+                        <h3>Multiband Spectral Audio Sculpting System | マルチバンド・スペクトラル音響造形システム</h3>
+                        
+                        <div style={{ marginBottom: '24px' }}>
+                            <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', marginBottom: '8px' }}>EN</div>
+                            <p>SpectraLine is designed for surgical and aesthetic manipulation of the audio frequency spectrum. It breaks audio signals into discrete frequency bands, allowing users to draw lines and curves that act as spectral envelopes or dynamic filters. With a visual-first approach to equalization and filtering, SpectraLine lets users "paint" the sound, making it unparalleled for experimental sound design, frequency isolation, and creating unique dynamic textures.</p>
+                            <ul><li>Key Features: Spectral Envelope Drawing, Multiband Isolation, Precision Filtering Algorithms.</li></ul>
+                        </div>
+
+                        <div>
+                            <div style={{ display: 'inline-block', background: 'rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 'bold', marginBottom: '8px' }}>JP</div>
+                            <p>SpectraLineは、音の周波数帯域（スペクトル）に対して、視覚的かつ繊細なアプローチでアプローチする音響造形ツールです。オーディオ信号を複数の帯域に分割し、画面上に曲線やライン（Line）を描くことで、それがそのままEQやダイナミックフィルターの制御用エンベロープとして機能します。「音を絵を描くようにデザインする」という直感的な操作感により、実験的なサウンドデザインや特定の周波数のみを抽出した特殊なテクスチャ作成を可能にします。</p>
+                            <ul><li>主要機能: スペクトル・エンベロープの描画、マルチバンド分離、精密なフィルターアルゴリズム。</li></ul>
+                        </div>
+                    </div>
+                </div>
+            )}
         </header>
     );
 };
