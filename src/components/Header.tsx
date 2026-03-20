@@ -225,7 +225,7 @@ export const Header: React.FC = () => {
                     color: #fff;
                     background: rgba(255, 255, 255, 0.1);
                 }
-            `}
+           
                 .info-modal-overlay {
                     position: fixed; top: 0; left: 0; right: 0; bottom: 0;
                     background: rgba(0,0,0,0.75); backdrop-filter: blur(8px);
@@ -257,6 +257,7 @@ export const Header: React.FC = () => {
                 }
                 .info-btn:hover { color: #f8fafc; }
     
+            `}
             </style>
         
             {showInfo && (
