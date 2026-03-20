@@ -1,29 +1,14 @@
-# SpectraLine ⚡
+# SpectraLine
 
-**SpectraLine** is a premium artistic tool part of the **Poetic Signal Toolkit**, designed to transform images into stylized line art using advanced color quantization and gradient mapping.
+**Multiband Spectral Audio Sculpting System** | **マルチバンド・スペクトラル音響造形システム**
 
-## Features
-- **Color Quantization (K-Means)**: Simplify image color palettes for clean, graphic effects.
-- **Scientific Mode**: Use perceptual color science (CIE L*a*b*) for more accurate edge detection.
-- **Contour Extraction**: Generate organic vector-like contours from luminance maps.
-- **Ink & Bleed Simulation**: Mimic the physical properties of ink spreading on paper.
-- **PRO Gating**: High-resolution exports and advanced map saves are available for PRO license holders.
+### [ English ]
+SpectraLine is designed for surgical and aesthetic manipulation of the audio frequency spectrum. It breaks audio signals into discrete frequency bands, allowing users to draw lines and curves that act as spectral envelopes or dynamic filters. With a visual-first approach to equalization and filtering, SpectraLine lets users "paint" the sound, making it unparalleled for experimental sound design, frequency isolation, and creating unique dynamic textures.
+*   **Key Features:** Spectral Envelope Drawing, Multiband Isolation, Precision Filtering Algorithms.
 
-## Poetic Signal Toolkit
-This application is part of a unified suite of aesthetic signal processing tools. 
-- Integrated Authentication via Supabase.
-- Global Payment compliance via LemonSqueezy.
-
-## Development
-```bash
-npm install
-npm run dev
-```
-
-## Deployment
-SpectraLine is optimized for Vercel deployment. Ensure the following environment variables are set:
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
+### [ 日本語 ]
+SpectraLineは、音の周波数帯域（スペクトル）に対して、視覚的かつ繊細なアプローチでアプローチする音響造形ツールです。オーディオ信号を複数の帯域に分割し、画面上に曲線やライン（Line）を描くことで、それがそのままEQやダイナミックフィルターの制御用エンベロープとして機能します。「音を絵を描くようにデザインする」という直感的な操作感により、実験的なサウンドデザインや特定の周波数のみを抽出した特殊なテクスチャ作成を可能にします。
+*   **主要機能:** スペクトル・エンベロープの描画、マルチバンド分離、精密なフィルターアルゴリズム。
 
 ---
-© 2026 Poetic Signal Toolkit. Developed by Fumio.
+*Part of the Poetic Signal Toolkit*
