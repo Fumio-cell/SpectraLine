@@ -23,8 +23,10 @@ export const Header: React.FC = () => {
                     .then(({ data }) => {
                         const pro = !!(data as any)?.is_pro;
                         const finalPro = pro || foundUser?.email === 'fumiotashiro@gmail.com';
+                        (window as any).__isPro = finalPro;
                         setIsPro(finalPro);
                         window.dispatchEvent(new CustomEvent('auth:status', { detail: { user: foundUser, isPro: finalPro } }));
+                        setTimeout(() => window.dispatchEvent(new CustomEvent('auth:status', { detail: { user: foundUser, isPro: finalPro } })), 200);
                     });
             }
         });
@@ -40,8 +42,10 @@ export const Header: React.FC = () => {
                     .single();
                 const pro = !!(data as any)?.is_pro;
                 const finalPro = pro || currentUser?.email === 'fumiotashiro@gmail.com';
+                (window as any).__isPro = finalPro;
                 setIsPro(finalPro);
                 window.dispatchEvent(new CustomEvent('auth:status', { detail: { user: currentUser, isPro: finalPro } }));
+                setTimeout(() => window.dispatchEvent(new CustomEvent('auth:status', { detail: { user: currentUser, isPro: finalPro } })), 200);
             } else {
                 setIsPro(false);
                 window.dispatchEvent(new CustomEvent('auth:status', { detail: { user: null, isPro: false } }));
