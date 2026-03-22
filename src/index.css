@@ -7,9 +7,9 @@
   --text-muted: #94a3b8;
   --text-inactive: #475569;
   
-  --accent-color: #3b82f6;
-  --accent-hover: #2563eb;
-  --accent-active: #1d4ed8;
+  --accent-color: #7c5cfc;
+  --accent-hover: #6a4be0;
+  --accent-active: #5a3cc8;
   
   --danger-color: #ef4444;
   --danger-hover: #dc2626;
@@ -21,7 +21,7 @@
   
   --clip-bg: #334155;
   --clip-border: #475569;
-  --clip-selected: #3b82f6;
+  --clip-selected: #7c5cfc;
 
   --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --radius-sm: 4px;
