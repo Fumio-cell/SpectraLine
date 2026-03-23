@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { ZoomIn, ZoomOut, Maximize, SquareSplitHorizontal, LayoutGrid } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { ZoomIn, ZoomOut, Maximize, LayoutGrid, Loader } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { AppEngine } from '../core/engine';
 
@@ -15,6 +15,9 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
 
     const input = useAppStore(state => state.manifest.input);
     const params = useAppStore(state => state.manifest.params);
+    const isProcessing = useAppStore(state => state.isProcessing);
+    const processingStage = useAppStore(state => state.processingStage);
+    const setProcessing = useAppStore(state => state.setProcessing);
 
     const containerRef = useRef<HTMLDivElement>(null);
     const outCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -23,11 +26,34 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
     // App Engine reference
     const engineRef = useRef<AppEngine | null>(null);
 
-    // Track whether a full rebuild is pending
-    const rebuildPendingRef = useRef(false);
+    // Track previous maps params to avoid unnecessary full rebuilds
+    const prevMapsParamsRef = useRef<string>('');
+    const prevFileRef = useRef<File | null>(null);
 
-    // Track whether processImage is in progress to prevent double buildStrokes
-    const processingRef = useRef(false);
+    // Memoize maps params key to detect real changes
+    const mapsParamsKey = useMemo(() => {
+        return JSON.stringify({
+            maps: params.maps,
+            sourceMode: params.lines.sourceMode,
+            edgeThreshold: params.lines.edgeThreshold
+        });
+    }, [params.maps, params.lines.sourceMode, params.lines.edgeThreshold]);
+
+    // Memoize lines params key
+    const linesParamsKey = useMemo(() => {
+        return JSON.stringify({
+            strokeDensity: params.lines.strokeDensity,
+            randomness: params.lines.randomness,
+            wobbleAmp: params.lines.wobbleAmp,
+            strokeLength: params.lines.strokeLength,
+            widthMin: params.lines.widthMin,
+            widthMax: params.lines.widthMax,
+            seed: params.lines.seed,
+            inkBlur: params.inkBlur
+        });
+    }, [params.lines.strokeDensity, params.lines.randomness, params.lines.wobbleAmp,
+        params.lines.strokeLength, params.lines.widthMin, params.lines.widthMax,
+        params.lines.seed, params.inkBlur]);
 
     // Initialize engine once
     useEffect(() => {
@@ -37,53 +63,73 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
         }
     }, [onEngineReady]);
 
-    // Effect: When image or generic map params change, rebuild maps
+    // Effect: When image changes OR maps params change → full rebuild
     useEffect(() => {
+        if (!engineRef.current || !input.file) return;
+
+        const fileChanged = input.file !== prevFileRef.current;
+        const mapsChanged = mapsParamsKey !== prevMapsParamsRef.current;
+
+        if (!fileChanged && !mapsChanged) return;
+
+        prevFileRef.current = input.file;
+        prevMapsParamsRef.current = mapsParamsKey;
+
         let isCancelled = false;
-        rebuildPendingRef.current = true;
+        setProcessing(true, 'Building maps...');
 
-        const handleRebuild = async () => {
-            if (isCancelled) return;
-            rebuildPendingRef.current = false;
+        const timeout = setTimeout(() => {
+            if (isCancelled || !engineRef.current) return;
 
-            if (!engineRef.current || !input.file) return;
-
-            processingRef.current = true;
-
-            // Set callbacks BEFORE calling processImage to avoid timing issues
             engineRef.current.onMapsReady = () => {
                 if (isCancelled) return;
-                // Automatically build strokes after maps are ready
+                setProcessing(true, 'Tracing strokes...');
                 engineRef.current?.buildStrokes(params);
-                // Reset processing flag after strokes are queued
-                processingRef.current = false;
             };
 
             engineRef.current.onRenderComplete = () => {
-                // Could sync UI state if needed
+                if (isCancelled) return;
+                setProcessing(false);
             };
 
-            engineRef.current.processImage(input.file, params);
-        };
+            engineRef.current.processImage(input.file!, params);
+        }, fileChanged ? 100 : 400);
 
-        // Debounce to avoid rapid re-triggers
-        const timeout = setTimeout(() => handleRebuild(), 500);
         return () => {
             isCancelled = true;
             clearTimeout(timeout);
         };
-    }, [input.file, params.maps, params.lines.sourceMode, params.lines.edgeThreshold]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [input.file, mapsParamsKey]);
 
-    // Effect: When line specific params or ink change, just rebuild strokes and render
-    // Skip if processImage flow is already handling it
+    // Effect: When ONLY line/ink params change → rebuild strokes only (skip maps)
     useEffect(() => {
+        if (!engineRef.current || !input.file) return;
+
+        // Skip if we haven't done a full build yet
+        if (!prevMapsParamsRef.current) return;
+
+        let isCancelled = false;
+
         const timeout = setTimeout(() => {
-            if (engineRef.current && input.file && !processingRef.current && !rebuildPendingRef.current) {
-                engineRef.current.buildStrokes(params);
-            }
-        }, 300);
-        return () => clearTimeout(timeout);
-    }, [params.lines.strokeDensity, params.lines.randomness, params.lines.wobbleAmp, params.lines.strokeLength, params.lines.widthMin, params.lines.widthMax, params.inkBlur, params.lines.seed]);
+            if (isCancelled || !engineRef.current) return;
+
+            setProcessing(true, 'Retracing strokes...');
+
+            engineRef.current.onRenderComplete = () => {
+                if (isCancelled) return;
+                setProcessing(false);
+            };
+
+            engineRef.current.buildStrokes(params);
+        }, 350);
+
+        return () => {
+            isCancelled = true;
+            clearTimeout(timeout);
+        };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [linesParamsKey]);
 
 
     return (
@@ -118,15 +164,67 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
                 >
                     <LayoutGrid size={16} />
                 </button>
-                <button title="Split Compare"><SquareSplitHorizontal size={16} /></button>
+
+                {/* Processing indicator */}
+                {isProcessing && (
+                    <div style={{
+                        marginLeft: 'auto',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontSize: '0.75rem',
+                        color: 'var(--accent-color)',
+                        padding: '3px 10px',
+                        borderRadius: '12px',
+                        backgroundColor: 'rgba(100, 108, 255, 0.1)',
+                        border: '1px solid rgba(100, 108, 255, 0.2)'
+                    }}>
+                        <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                        {processingStage || 'Processing...'}
+                    </div>
+                )}
             </div>
 
             {/* Canvas Area */}
             <div
                 ref={containerRef}
                 className={`canvas-stage-wrapper ${showChecker ? 'checkerboard' : ''}`}
-                style={{ overflow: 'auto' }}
+                style={{ overflow: 'auto', position: 'relative' }}
             >
+                {/* Processing overlay */}
+                {isProcessing && (
+                    <div style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: 'rgba(15, 17, 23, 0.5)',
+                        zIndex: 10,
+                        pointerEvents: 'none'
+                    }}>
+                        <div style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            gap: '12px',
+                            padding: '24px 32px',
+                            borderRadius: '16px',
+                            backgroundColor: 'rgba(30, 35, 50, 0.9)',
+                            border: '1px solid rgba(100, 108, 255, 0.3)',
+                            backdropFilter: 'blur(8px)'
+                        }}>
+                            <Loader size={28} style={{ animation: 'spin 1s linear infinite', color: 'var(--accent-color)' }} />
+                            <span style={{ fontSize: '0.85rem', color: 'var(--text-main)' }}>
+                                {processingStage || 'Processing...'}
+                            </span>
+                        </div>
+                    </div>
+                )}
+
                 <div style={{
                     transform: `scale(${zoom / 100})`,
                     transformOrigin: 'center center',
@@ -154,7 +252,7 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
                         }}
                     />
 
-                    {/* Maps canvas - gradient/edge visualization */}
+                    {/* Maps canvas */}
                     <canvas
                         id="maps-canvas"
                         ref={mapsCanvasRef}
@@ -166,7 +264,7 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
                         }}
                     />
 
-                    {/* Lines canvas - stroke rendering */}
+                    {/* Lines canvas */}
                     <canvas
                         id="renderer-canvas"
                         ref={outCanvasRef}
@@ -178,7 +276,7 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
                         }}
                     />
 
-                    {/* Compare view: side-by-side Original and Lines */}
+                    {/* Compare view */}
                     {activeTab === 'Compare' && input.file && (
                         <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
                             <div style={{ flex: 1, textAlign: 'center' }}>

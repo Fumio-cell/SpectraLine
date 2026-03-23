@@ -33,6 +33,8 @@ class PRNG {
 /**
  * Build high-quality flowing strokes that trace along gradient flow fields.
  * Produces dense, long, smooth curves similar to pen-and-ink illustration style.
+ * 
+ * Performance-optimized: caps strokes at 3000, uses coarser grid, fewer retry attempts.
  */
 export function buildStrokes(
     width: number,
@@ -46,25 +48,24 @@ export function buildStrokes(
     const strokes: StrokePath[] = [];
     const rng = new PRNG(params.seed === 0 ? Math.floor(Math.random() * 10000) : params.seed);
 
-    // Density-based stroke count - generous limits for rich output
-    const rawCount = Math.floor((width * height * params.strokeDensity) / 400);
-    const maxStrokes = Math.min(rawCount, 8000);
+    // Density-based stroke count - capped more aggressively for performance
+    const rawCount = Math.floor((width * height * params.strokeDensity) / 600);
+    const maxStrokes = Math.min(rawCount, 3000);
 
-    // Coverage tracking
-    const cellSize = 3;
+    // Coverage tracking with coarser grid for speed
+    const cellSize = 4;
     const gridW = Math.ceil(width / cellSize);
     const gridH = Math.ceil(height / cellSize);
     const visited = new Uint8Array(gridW * gridH);
 
     // Pre-compute luminance-based density map
-    // More strokes in darker/more detailed areas
     const densityMap = new Float32Array(width * height);
     for (let i = 0; i < width * height; i++) {
         densityMap[i] = Math.max(magnitude[i], (1.0 - luminance[i]) * 0.6);
     }
 
     let idCounter = 0;
-    const stepSize = 3.0; // Larger step = fewer points per stroke = faster rendering
+    const stepSize = 4.0; // Larger step = fewer points per stroke = faster rendering
 
     for (let i = 0; i < maxStrokes; i++) {
         // 1. Pick a random seed point
@@ -78,11 +79,10 @@ export function buildStrokes(
         const gy = Math.floor(startY / cellSize);
         const gridIdx = gy * gridW + gx;
 
-        // Probability-based placement: more likely in high-density areas
-        if (density < params.edgeThreshold * 0.1 || visited[gridIdx] >= 6) {
-            // Try harder to find a valid spot
+        // Fewer retries for performance
+        if (density < params.edgeThreshold * 0.1 || visited[gridIdx] >= 5) {
             let found = false;
-            for (let j = 0; j < 25; j++) {
+            for (let j = 0; j < 12; j++) {
                 startX = Math.floor(rng.nextFloat() * width);
                 startY = Math.floor(rng.nextFloat() * height);
                 idx = startY * width + startX;
@@ -90,7 +90,7 @@ export function buildStrokes(
                 const ngx = Math.floor(startX / cellSize);
                 const ngy = Math.floor(startY / cellSize);
                 const ngridIdx = ngy * gridW + ngx;
-                if (density >= params.edgeThreshold * 0.1 && visited[ngridIdx] < 6) {
+                if (density >= params.edgeThreshold * 0.1 && visited[ngridIdx] < 5) {
                     found = true;
                     break;
                 }
@@ -165,7 +165,7 @@ export function buildStrokes(
 
 /**
  * Trace a single direction along the flow field.
- * Returns an array of smoothly interpolated points.
+ * Records every 6th point for performance.
  */
 function traceDirection(
     startX: number,
@@ -177,7 +177,7 @@ function traceDirection(
     params: LineParams,
     rng: PRNG,
     stepSize: number,
-    dirSign: number, // 1 = forward, -1 = backward
+    dirSign: number,
     densityMap: Float32Array,
     _visited: Uint8Array,
     _gridW: number,
@@ -192,7 +192,7 @@ function traceDirection(
 
     points.push({ x: cx, y: cy, t: 0 });
 
-    // Smooth direction tracking to avoid jitter
+    // Smooth direction tracking
     let prevDir = 0;
     let initialized = false;
 
@@ -204,23 +204,18 @@ function traceDirection(
 
         const cIdx = iy * width + ix;
 
-        // Get gradient direction and flow perpendicular to it
         let dir = direction[cIdx] + Math.PI / 2;
         dir *= dirSign;
 
-        // Smooth direction changes to produce flowing curves
         if (initialized) {
-            // Unwrap angle difference
             let angleDiff = dir - prevDir;
             while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
             while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
-            // Smooth interpolation (stronger smoothing = smoother curves)
             dir = prevDir + angleDiff * 0.3;
         }
         initialized = true;
         prevDir = dir;
 
-        // Wobble perturbation (more subtle for flowing lines)
         const wobble = Math.sin(step * params.wobbleFreq * 0.05) * params.wobbleAmp * 0.3;
         dir += wobble;
 
@@ -230,17 +225,15 @@ function traceDirection(
         cx += dx;
         cy += dy;
 
-        // Bounds check
         if (cx < 1 || cx >= width - 1 || cy < 1 || cy >= height - 1) break;
 
-        // Stop in very low density areas for 'Edges' mode
         if (params.sourceMode === 'Edges') {
             const newIdx = Math.floor(cy) * width + Math.floor(cx);
             if (densityMap[newIdx] < params.edgeThreshold * 0.05) break;
         }
 
-        // Record every 4th point for performance (smoothed by Bézier in renderer)
-        if (step % 4 === 0) {
+        // Record every 6th point for performance
+        if (step % 6 === 0) {
             points.push({ x: cx, y: cy, t: 0 });
         }
     }

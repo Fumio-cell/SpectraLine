@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { Params, ProjectManifest, Preset, ProjectInput } from '../core/types';
 
 const defaultParams: Params = {
-    preview: { previewMaxEdge: 2048 },
+    preview: { previewMaxEdge: 1024 },
     maps: {
         colorQuantK: 8,
         colorSmoothing: 0.2,
@@ -17,7 +17,7 @@ const defaultParams: Params = {
         sourceMode: 'Hybrid',
         edgeThreshold: 0.08,
         strokeDensity: 1.0,
-        strokeLength: 150,
+        strokeLength: 80,
         widthMin: 0.5,
         widthMax: 1.5,
         pressureTaper: 0.6,
@@ -47,7 +47,7 @@ const presets: Preset[] = [
         name: 'Clean Ink',
         params: {
             ...defaultParams,
-            lines: { ...defaultParams.lines, strokeDensity: 2.0, strokeLength: 300, wobbleAmp: 0.1, randomness: 3, widthMin: 0.3, widthMax: 1.0 },
+            lines: { ...defaultParams.lines, strokeDensity: 1.5, strokeLength: 120, wobbleAmp: 0.1, randomness: 3, widthMin: 0.3, widthMax: 1.0 },
             inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 0, bleedBlurPx: 0, bleedOpacityPct: 0 }
         }
     },
@@ -56,7 +56,7 @@ const presets: Preset[] = [
         name: 'Pencil Sketch',
         params: {
             ...defaultParams,
-            lines: { ...defaultParams.lines, strokeDensity: 5.0, strokeLength: 500, widthMin: 0.3, widthMax: 1.2, wobbleAmp: 0.6, randomness: 15 },
+            lines: { ...defaultParams.lines, strokeDensity: 2.5, strokeLength: 150, widthMin: 0.3, widthMax: 1.2, wobbleAmp: 0.6, randomness: 15 },
             inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 0.3, bleedBlurPx: 0.5, bleedOpacityPct: 8 }
         }
     },
@@ -66,7 +66,7 @@ const presets: Preset[] = [
         params: {
             ...defaultParams,
             maps: { ...defaultParams.maps, contoursEnabled: true, contourLevels: 24 },
-            lines: { ...defaultParams.lines, sourceMode: 'Contours', strokeDensity: 1.4, wobbleAmp: 0.4, randomness: 8 },
+            lines: { ...defaultParams.lines, sourceMode: 'Contours', strokeDensity: 1.2, wobbleAmp: 0.4, randomness: 8 },
             inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 1, bleedBlurPx: 1, bleedOpacityPct: 10 }
         }
     },
@@ -75,7 +75,7 @@ const presets: Preset[] = [
         name: 'Glitchy Analog',
         params: {
             ...defaultParams,
-            lines: { ...defaultParams.lines, wobbleAmp: 2.2, wobbleFreq: 7, randomness: 55, strokeDensity: 1.3 },
+            lines: { ...defaultParams.lines, wobbleAmp: 2.2, wobbleFreq: 7, randomness: 55, strokeDensity: 1.0 },
             inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 2, bleedBlurPx: 2.5, bleedOpacityPct: 20 }
         }
     },
@@ -84,8 +84,8 @@ const presets: Preset[] = [
         name: 'Wet Ink',
         params: {
             ...defaultParams,
-            lines: { ...defaultParams.lines, widthMax: 5.5, pressureTaper: 0.7, strokeDensity: 1.0 },
-            inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 6, bleedBlurPx: 6, bleedOpacityPct: 45, bleedMode: 'Multiply' }
+            lines: { ...defaultParams.lines, widthMax: 5.5, pressureTaper: 0.7, strokeDensity: 0.8, strokeLength: 80 },
+            inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 4, bleedBlurPx: 4, bleedOpacityPct: 35, bleedMode: 'Multiply' }
         }
     }
 ];
@@ -93,11 +93,14 @@ const presets: Preset[] = [
 interface AppState {
     manifest: ProjectManifest;
     activePresetId: string;
+    isProcessing: boolean;
+    processingStage: string;
     setManifest: (update: Partial<ProjectManifest>) => void;
     setInput: (input: Partial<ProjectInput>) => void;
     updateParams: (section: keyof Params, update: any) => void;
     applyPreset: (presetId: string) => void;
     resetProject: () => void;
+    setProcessing: (isProcessing: boolean, stage?: string) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -111,6 +114,8 @@ export const useAppStore = create<AppState>((set) => ({
         presets: presets
     },
     activePresetId: 'default',
+    isProcessing: false,
+    processingStage: '',
 
     setManifest: (update) => set((state) => ({
         manifest: { ...state.manifest, ...update, updatedAt: new Date().toISOString() }
@@ -152,6 +157,8 @@ export const useAppStore = create<AppState>((set) => ({
 
     resetProject: () => set(() => ({
         activePresetId: 'default',
+        isProcessing: false,
+        processingStage: '',
         manifest: {
             version: '1.2',
             projectId: Math.random().toString(36).substring(2, 10),
@@ -161,5 +168,7 @@ export const useAppStore = create<AppState>((set) => ({
             params: structuredClone(defaultParams),
             presets: presets
         }
-    }))
+    })),
+
+    setProcessing: (isProcessing, stage = '') => set({ isProcessing, processingStage: stage })
 }));

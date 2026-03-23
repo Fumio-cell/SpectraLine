@@ -56,7 +56,7 @@ const Inspector = () => {
                 <div className="control-group">
                     <label className="control-header">Preview Target Size</label>
                     <select className="select-input" disabled value={params.preview.previewMaxEdge}>
-                        <option value="2048">Max Edge 2048px (Fast)</option>
+                        <option value="1024">Max Edge 1024px (Fast)</option>
                     </select>
                 </div>
             </AccordionSection>
