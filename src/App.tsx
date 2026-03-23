@@ -42,45 +42,33 @@ function App() {
       openLemonSqueezyCheckout(userStatus.user.id);
     };
 
-    const handleGatedAction = (action: () => Promise<void>) => {
-      if (!userStatus.isPro) {
-        if (confirm('This is a PRO feature. Would you like to upgrade now?')) {
-          handleBuyPro();
-        }
-        return;
-      }
-      action();
-    };
+
 
     const handleExport = async () => {
       if (!engine) return;
-      handleGatedAction(async () => {
-        const state = useAppStore.getState();
-        const input = state.manifest.input;
-        const params = state.manifest.params;
+      const state = useAppStore.getState();
+      const input = state.manifest.input;
+      const params = state.manifest.params;
 
-        if (!input.file) {
-          alert('Please import an image first.');
-          return;
-        }
+      if (!input.file) {
+        alert('Please import an image first.');
+        return;
+      }
 
-        try {
-          await engine.exportPNG(params);
-        } catch (err: any) {
-          alert(`Export failed: ${err.message}`);
-        }
-      });
+      try {
+        await engine.exportPNG(params);
+      } catch (err: any) {
+        alert(`Export failed: ${err.message}`);
+      }
     };
 
     const handleExportMap = async () => {
       if (!engine) return;
-      handleGatedAction(async () => {
-        try {
-          await engine.exportMapPNG();
-        } catch (err: any) {
-          alert(`Export map failed: ${err.message}`);
-        }
-      });
+      try {
+        await engine.exportMapPNG();
+      } catch (err: any) {
+        alert(`Export map failed: ${err.message}`);
+      }
     };
 
     window.addEventListener('app:export', handleExport);

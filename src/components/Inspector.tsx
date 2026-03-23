@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { ChevronDown, ChevronRight, Info } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 
@@ -31,13 +31,8 @@ const Inspector = () => {
     const handleInkBlurChange = (field: string, value: any) => updateParams('inkBlur', { [field]: value });
     const handleExportChange = (field: string, value: any) => updateParams('export', { [field]: value });
 
-    const [isPro, setIsPro] = useState(false);
 
-    useEffect(() => {
-        const handleAuth = (e: any) => setIsPro(e.detail.isPro);
-        window.addEventListener('auth:status', handleAuth as EventListener);
-        return () => window.removeEventListener('auth:status', handleAuth as EventListener);
-    }, []);
+
 
     return (
         <div className="right-inspector">
@@ -254,19 +249,14 @@ const Inspector = () => {
                 </div>
 
                 <button
-                    className={!isPro ? 'gated' : ''}
-                    title={!isPro ? 'Upgrade to PRO to unlock' : ''}
                     style={{ marginTop: '1rem', backgroundColor: 'var(--accent-color)', color: '#fff', width: '100%', padding: '0.75rem' }}
                     onClick={() => {
-                        // Trigger download flow
                         window.dispatchEvent(new CustomEvent('app:export'));
                     }}
                 >
                     Export Lines
                 </button>
                 <button
-                    className={!isPro ? 'gated' : ''}
-                    title={!isPro ? 'Upgrade to PRO to unlock' : ''}
                     style={{ marginTop: '0.5rem', backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)', width: '100%', padding: '0.75rem', border: '1px solid var(--border-color)' }}
                     onClick={() => {
                         window.dispatchEvent(new CustomEvent('app:exportMap'));
