@@ -6,7 +6,7 @@ const defaultParams: Params = {
     maps: {
         colorQuantK: 8,
         colorSmoothing: 0.2,
-        gradientGain: 1.0,
+        gradientGain: 1.5,
         gradientThreshold: 0.05,
         contoursEnabled: false,
         contourLevels: 12,
@@ -47,7 +47,8 @@ const presets: Preset[] = [
         name: 'Clean Ink',
         params: {
             ...defaultParams,
-            lines: { ...defaultParams.lines, strokeDensity: 2.5, strokeLength: 50, wobbleAmp: 0.0, wobbleFreq: 0, randomness: 3, widthMin: 0.15, widthMax: 0.5, pressureTaper: 0.3 },
+            maps: { ...defaultParams.maps, gradientGain: 2.0 },
+            lines: { ...defaultParams.lines, strokeDensity: 3.5, strokeLength: 90, wobbleAmp: 0.0, wobbleFreq: 0, randomness: 2, widthMin: 0.1, widthMax: 0.4, pressureTaper: 0.2 },
             inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 0, bleedBlurPx: 0, bleedOpacityPct: 0 }
         }
     },
@@ -56,8 +57,9 @@ const presets: Preset[] = [
         name: 'Pencil Sketch',
         params: {
             ...defaultParams,
-            lines: { ...defaultParams.lines, strokeDensity: 3.0, strokeLength: 60, widthMin: 0.15, widthMax: 0.6, wobbleAmp: 0.1, wobbleFreq: 1.0, randomness: 5, pressureTaper: 0.4 },
-            inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 0.2, bleedBlurPx: 0.3, bleedOpacityPct: 5 }
+            maps: { ...defaultParams.maps, gradientGain: 2.0 },
+            lines: { ...defaultParams.lines, strokeDensity: 4.0, strokeLength: 80, widthMin: 0.1, widthMax: 0.5, wobbleAmp: 0.05, wobbleFreq: 0.5, randomness: 3, pressureTaper: 0.3 },
+            inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 0.15, bleedBlurPx: 0.2, bleedOpacityPct: 3 }
         }
     },
     {

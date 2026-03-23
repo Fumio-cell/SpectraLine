@@ -217,7 +217,7 @@ export class AppEngine {
         ctxOut.fillRect(0, 0, width, height);
 
         const useBleed = params.inkBlur.bleedOpacityPct > 0;
-        const BATCH_SIZE = 400;
+        const BATCH_SIZE = 800;
         let offset = 0;
 
         console.time('[Engine] Render');

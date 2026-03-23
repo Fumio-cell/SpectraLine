@@ -30,16 +30,16 @@ class PRNG {
 }
 
 /**
- * Multi-pass cross-hatching system for realistic pencil/ink drawing.
+ * Multi-pass cross-hatching for realistic pencil/ink drawing.
  *
- * Real pencil drawings build tone through layered hatching:
- *  - Light areas: single sparse layer at one angle
- *  - Mid-tones: two layers at different angles (cross-hatching)
- *  - Dark areas: three or more layers creating dense shading
- *  - Highlights: no strokes at all (pure white paper)
+ * 5 hatching passes build up tone through density layering:
+ *   Pass 0: ~32° angle, darkness > 0.05 — lightest base layer
+ *   Pass 1: ~110° angle, darkness > 0.18 — early cross-hatching
+ *   Pass 2: ~68° angle, darkness > 0.35 — mid-tone density
+ *   Pass 3: ~145° angle, darkness > 0.52 — shadow definition
+ *   Pass 4: ~20° angle, darkness > 0.72 — deepest shadow fill
  *
- * Each pass targets a minimum darkness threshold, so darker areas
- * naturally accumulate more hatching layers = deeper tone.
+ * Each pass has independent visited tracking so layers accumulate.
  */
 export function buildStrokes(
     width: number,
@@ -53,36 +53,37 @@ export function buildStrokes(
     const strokes: StrokePath[] = [];
     const rng = new PRNG(params.seed === 0 ? Math.floor(Math.random() * 10000) : params.seed);
 
-    const rawCount = Math.floor((width * height * params.strokeDensity) / 400);
-    const maxStrokes = Math.min(rawCount, 5000);
+    // Much more generous stroke budget for dense hatching
+    const rawCount = Math.floor((width * height * params.strokeDensity) / 200);
+    const maxStrokes = Math.min(rawCount, 16000);
 
-    // Multi-pass hatching: each pass targets increasingly darker areas
-    // and uses a different angle to create cross-hatching
+    // 5 hatching passes for richer tonal range
     const passes = [
-        { angle: Math.PI * 0.18,  minDarkness: 0.08, lengthMul: 1.0,  widthMul: 0.5,  alphaMul: 0.7  },
-        { angle: Math.PI * 0.68,  minDarkness: 0.25, lengthMul: 0.85, widthMul: 0.6,  alphaMul: 0.8  },
-        { angle: Math.PI * 0.43,  minDarkness: 0.45, lengthMul: 0.7,  widthMul: 0.75, alphaMul: 0.9  },
-        { angle: Math.PI * 0.88,  minDarkness: 0.65, lengthMul: 0.6,  widthMul: 1.0,  alphaMul: 1.0  },
+        { angle: Math.PI * 0.18,  minDarkness: 0.05, lengthMul: 1.0,  widthMul: 0.4,  alphaMul: 0.55 },
+        { angle: Math.PI * 0.61,  minDarkness: 0.18, lengthMul: 0.90, widthMul: 0.5,  alphaMul: 0.65 },
+        { angle: Math.PI * 0.38,  minDarkness: 0.35, lengthMul: 0.80, widthMul: 0.65, alphaMul: 0.75 },
+        { angle: Math.PI * 0.81,  minDarkness: 0.52, lengthMul: 0.70, widthMul: 0.80, alphaMul: 0.85 },
+        { angle: Math.PI * 0.11,  minDarkness: 0.72, lengthMul: 0.60, widthMul: 1.0,  alphaMul: 1.0  },
     ];
 
     const cellSize = 3;
     const gridW = Math.ceil(width / cellSize);
     const gridH = Math.ceil(height / cellSize);
 
-    // Pre-compute darkness map (inverted luminance)
+    // Pre-compute darkness
     const darknessMap = new Float32Array(width * height);
     for (let i = 0; i < width * height; i++) {
         darknessMap[i] = 1.0 - luminance[i];
     }
 
     let idCounter = 0;
-    const stepSize = 2.5;
+    const stepSize = 2.0; // Fine step for smooth lines
     const strokesPerPass = Math.floor(maxStrokes / passes.length);
 
     for (const pass of passes) {
-        // Fresh visited grid per pass (allows layering)
         const visited = new Uint8Array(gridW * gridH);
-        const hatchAngle = pass.angle + (rng.nextFloat() - 0.5) * 0.08;
+        // Slight per-pass angle variation for natural look
+        const hatchAngle = pass.angle + (rng.nextFloat() - 0.5) * 0.06;
 
         for (let i = 0; i < strokesPerPass; i++) {
             let startX = Math.floor(rng.nextFloat() * width);
@@ -90,11 +91,10 @@ export function buildStrokes(
             let idx = startY * width + startX;
             let darkness = darknessMap[idx];
 
-            // Skip if this area isn't dark enough for this pass
+            // Find a point dark enough for this pass
             if (darkness < pass.minDarkness) {
-                // Try to find a valid point
                 let found = false;
-                for (let j = 0; j < 20; j++) {
+                for (let j = 0; j < 30; j++) {
                     startX = Math.floor(rng.nextFloat() * width);
                     startY = Math.floor(rng.nextFloat() * height);
                     idx = startY * width + startX;
@@ -102,8 +102,7 @@ export function buildStrokes(
                     if (darkness >= pass.minDarkness) {
                         const ngx = Math.floor(startX / cellSize);
                         const ngy = Math.floor(startY / cellSize);
-                        const ngridIdx = ngy * gridW + ngx;
-                        if (visited[ngridIdx] < 4) {
+                        if (visited[ngy * gridW + ngx] < 6) {
                             found = true;
                             break;
                         }
@@ -114,69 +113,62 @@ export function buildStrokes(
 
             const gx = Math.floor(startX / cellSize);
             const gy = Math.floor(startY / cellSize);
-            const gridIdx = gy * gridW + gx;
-            if (visited[gridIdx] >= 4) continue;
+            if (visited[gy * gridW + gx] >= 6) continue;
 
-            // === TONAL-AWARE STROKE PROPERTIES ===
             const localDarkness = darknessMap[idx];
             const localMag = magnitude[idx];
 
-            // Stroke length: shorter strokes for finer hatching texture
+            // Stroke length: longer base for visible hatching lines
             const baseLen = params.strokeLength * pass.lengthMul;
-            const lenVar = 0.5 + localDarkness * 0.5;
-            const adjustedLength = Math.max(8, Math.floor(baseLen * lenVar));
+            const lenVar = 0.6 + localDarkness * 0.4;
+            const adjustedLength = Math.max(12, Math.floor(baseLen * lenVar));
 
-            // Width: thin lines, thicker in darker areas
-            const widthScale = (0.2 + localDarkness * 0.8) * pass.widthMul;
+            // Width: very thin for fine hatching, scaling with darkness
+            const widthScale = (0.15 + localDarkness * 0.85) * pass.widthMul;
             const adjWidthMin = Math.max(0.1, params.widthMin * widthScale);
-            const adjWidthMax = Math.max(0.15, params.widthMax * widthScale);
+            const adjWidthMax = Math.max(0.12, params.widthMax * widthScale);
 
-            // Alpha: builds up with darkness and pass depth
-            const baseAlpha = localDarkness * localDarkness;
-            const strokeAlpha = Math.max(0.04, Math.min(0.95, baseAlpha * pass.alphaMul + 0.04));
+            // Alpha: gradual buildup for smooth tonal transitions
+            const baseAlpha = 0.05 + localDarkness * 0.7;
+            const strokeAlpha = Math.max(0.03, Math.min(0.85, baseAlpha * pass.alphaMul));
 
-            // Color: grayscale with subtle source color
-            let strokeColor = { r: 35, g: 35, b: 35 };
+            // Color: subtle source color tint
+            let strokeColor = { r: 40, g: 40, b: 40 };
             if (imageData) {
                 const pixIdx = idx * 4;
-                const colorScale = 0.05 + localDarkness * 0.45;
+                const colorScale = 0.05 + localDarkness * 0.4;
                 strokeColor = {
-                    r: Math.max(0, Math.min(180, Math.floor(imageData[pixIdx] * colorScale))),
-                    g: Math.max(0, Math.min(180, Math.floor(imageData[pixIdx + 1] * colorScale))),
-                    b: Math.max(0, Math.min(180, Math.floor(imageData[pixIdx + 2] * colorScale)))
+                    r: Math.max(5, Math.min(160, Math.floor(imageData[pixIdx] * colorScale))),
+                    g: Math.max(5, Math.min(160, Math.floor(imageData[pixIdx + 1] * colorScale))),
+                    b: Math.max(5, Math.min(160, Math.floor(imageData[pixIdx + 2] * colorScale)))
                 };
             }
 
-            // Trace stroke
+            // Trace
             const halfLen = Math.floor(adjustedLength / 2);
-            const forwardPts = traceHatching(
+            const fwd = traceHatching(
                 startX, startY, width, height, magnitude, direction,
-                params, rng, stepSize, 1, darknessMap, luminance,
+                params, rng, stepSize, 1, darknessMap,
                 halfLen, hatchAngle, pass.minDarkness
             );
-            const backwardPts = traceHatching(
+            const bwd = traceHatching(
                 startX, startY, width, height, magnitude, direction,
-                params, rng, stepSize, -1, darknessMap, luminance,
+                params, rng, stepSize, -1, darknessMap,
                 halfLen, hatchAngle, pass.minDarkness
             );
 
-            // Combine
-            const allPoints: StrokePoint[] = [];
-            for (let b = backwardPts.length - 1; b > 0; b--) {
-                allPoints.push(backwardPts[b]);
-            }
-            for (const fp of forwardPts) {
-                allPoints.push(fp);
-            }
+            // Combine backward (reversed) + forward
+            const pts: StrokePoint[] = [];
+            for (let b = bwd.length - 1; b > 0; b--) pts.push(bwd[b]);
+            for (const fp of fwd) pts.push(fp);
 
-            const totalLen = allPoints.length;
+            const totalLen = pts.length;
             for (let p = 0; p < totalLen; p++) {
-                allPoints[p].t = totalLen > 1 ? p / (totalLen - 1) : 0;
+                pts[p].t = totalLen > 1 ? p / (totalLen - 1) : 0;
             }
 
-            if (allPoints.length > 2) {
-                // Mark visited
-                for (const pt of allPoints) {
+            if (pts.length > 2) {
+                for (const pt of pts) {
                     const cgx = Math.floor(pt.x / cellSize);
                     const cgy = Math.floor(pt.y / cellSize);
                     if (cgx >= 0 && cgx < gridW && cgy >= 0 && cgy < gridH) {
@@ -187,7 +179,7 @@ export function buildStrokes(
 
                 strokes.push({
                     id: `s_${idCounter++}`,
-                    points: allPoints,
+                    points: pts,
                     style: {
                         widthMin: adjWidthMin,
                         widthMax: adjWidthMax,
@@ -208,11 +200,9 @@ export function buildStrokes(
 }
 
 /**
- * Trace hatching stroke with intelligent direction:
- * - Near strong edges: follow contour for form definition
- * - In flat areas: use fixed hatching angle for organized tone
- * - Strong smoothing for clean, disciplined lines
- * - Early termination when entering bright areas (preserve highlights)
+ * Trace hatching with form-following direction blending.
+ * Near edges, strokes follow contours; in flat areas, straight hatching.
+ * Very strong smoothing for clean disciplined lines.
  */
 function traceHatching(
     startX: number,
@@ -226,7 +216,6 @@ function traceHatching(
     stepSize: number,
     dirSign: number,
     darknessMap: Float32Array,
-    _luminance: Float32Array,
     maxSteps: number,
     hatchAngle: number,
     minDarkness: number
@@ -254,42 +243,39 @@ function traceHatching(
         const localDarkness = darknessMap[cIdx];
         const mag = magnitude[cIdx];
 
-        // Stop tracing if we enter an area too bright for this pass
-        if (localDarkness < minDarkness * 0.5) {
+        // Stop if entering area too bright for this pass
+        if (localDarkness < minDarkness * 0.4) {
             brightCount++;
-            if (brightCount > 3) break;
+            if (brightCount > 5) break;
         } else {
             brightCount = 0;
         }
 
-        // Direction: blend between hatching angle and gradient contour
+        // Direction: contour-following near edges, hatching in flat areas
         const gradDir = (direction[cIdx] + Math.PI / 2) * dirSign;
         let dir: number;
 
-        if (mag > 0.25) {
-            // Strong edge: follow contour
+        if (mag > 0.3) {
             dir = gradDir;
         } else if (mag > 0.08) {
-            // Blend zone
-            const blend = (mag - 0.08) / 0.17;
+            const blend = (mag - 0.08) / 0.22;
             dir = lerpAngle(hatchAngle * dirSign, gradDir, blend);
         } else {
-            // Flat area: organized hatching
             dir = hatchAngle * dirSign;
         }
 
-        // Very strong direction smoothing for disciplined lines
+        // Strong direction smoothing = disciplined flowing lines
         if (initialized) {
             let angleDiff = dir - prevDir;
             while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
             while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
-            dir = prevDir + angleDiff * 0.12;
+            dir = prevDir + angleDiff * 0.10; // Very strong smoothing
         }
         initialized = true;
         prevDir = dir;
 
-        // Minimal wobble
-        const wobble = Math.sin(step * params.wobbleFreq * 0.02) * params.wobbleAmp * 0.1;
+        // Very subtle wobble for natural texture
+        const wobble = Math.sin(step * params.wobbleFreq * 0.015) * params.wobbleAmp * 0.08;
         dir += wobble;
 
         cx += Math.cos(dir) * stepSize;
@@ -297,7 +283,7 @@ function traceHatching(
 
         if (cx < 1 || cx >= width - 1 || cy < 1 || cy >= height - 1) break;
 
-        // Record every 3rd point for smooth Bézier
+        // Record every 3rd point for smooth Bézier curves
         if (step % 3 === 0) {
             points.push({ x: cx, y: cy, t: 0 });
         }
