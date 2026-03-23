@@ -47,7 +47,7 @@ const presets: Preset[] = [
         name: 'Clean Ink',
         params: {
             ...defaultParams,
-            lines: { ...defaultParams.lines, strokeDensity: 2.0, strokeLength: 200, wobbleAmp: 0.0, wobbleFreq: 0, randomness: 2, widthMin: 0.2, widthMax: 0.7 },
+            lines: { ...defaultParams.lines, strokeDensity: 2.5, strokeLength: 50, wobbleAmp: 0.0, wobbleFreq: 0, randomness: 3, widthMin: 0.15, widthMax: 0.5, pressureTaper: 0.3 },
             inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 0, bleedBlurPx: 0, bleedOpacityPct: 0 }
         }
     },
@@ -56,8 +56,8 @@ const presets: Preset[] = [
         name: 'Pencil Sketch',
         params: {
             ...defaultParams,
-            lines: { ...defaultParams.lines, strokeDensity: 2.5, strokeLength: 150, widthMin: 0.3, widthMax: 1.2, wobbleAmp: 0.6, randomness: 15 },
-            inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 0.3, bleedBlurPx: 0.5, bleedOpacityPct: 8 }
+            lines: { ...defaultParams.lines, strokeDensity: 3.0, strokeLength: 60, widthMin: 0.15, widthMax: 0.6, wobbleAmp: 0.1, wobbleFreq: 1.0, randomness: 5, pressureTaper: 0.4 },
+            inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 0.2, bleedBlurPx: 0.3, bleedOpacityPct: 5 }
         }
     },
     {
