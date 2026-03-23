@@ -4,6 +4,7 @@ export interface StrokePoint {
     x: number;
     y: number;
     t: number;
+    pressure: number; // Dynamic pressure at this point [0, 1]
 }
 
 export interface StrokePath {
@@ -30,16 +31,12 @@ class PRNG {
 }
 
 /**
- * Multi-pass cross-hatching for realistic pencil/ink drawing.
- *
- * 5 hatching passes build up tone through density layering:
- *   Pass 0: ~32° angle, darkness > 0.05 — lightest base layer
- *   Pass 1: ~110° angle, darkness > 0.18 — early cross-hatching
- *   Pass 2: ~68° angle, darkness > 0.35 — mid-tone density
- *   Pass 3: ~145° angle, darkness > 0.52 — shadow definition
- *   Pass 4: ~20° angle, darkness > 0.72 — deepest shadow fill
- *
- * Each pass has independent visited tracking so layers accumulate.
+ * Artist-Driven Multi-Pass Tracer
+ * 
+ * Simulates a human artist building a pencil drawing:
+ * 1. Outline Pass: Sharp, form-following lines (Contours)
+ * 2. Tonal Passes: Layered hatching at specific angles
+ * 3. Detail Pass: High-contrast focus
  */
 export function buildStrokes(
     width: number,
@@ -53,56 +50,55 @@ export function buildStrokes(
     const strokes: StrokePath[] = [];
     const rng = new PRNG(params.seed === 0 ? Math.floor(Math.random() * 10000) : params.seed);
 
-    // Much more generous stroke budget for dense hatching
-    const rawCount = Math.floor((width * height * params.strokeDensity) / 200);
-    const maxStrokes = Math.min(rawCount, 16000);
-
-    // 5 hatching passes for richer tonal range
-    const passes = [
-        { angle: Math.PI * 0.18,  minDarkness: 0.05, lengthMul: 1.0,  widthMul: 0.4,  alphaMul: 0.55 },
-        { angle: Math.PI * 0.61,  minDarkness: 0.18, lengthMul: 0.90, widthMul: 0.5,  alphaMul: 0.65 },
-        { angle: Math.PI * 0.38,  minDarkness: 0.35, lengthMul: 0.80, widthMul: 0.65, alphaMul: 0.75 },
-        { angle: Math.PI * 0.81,  minDarkness: 0.52, lengthMul: 0.70, widthMul: 0.80, alphaMul: 0.85 },
-        { angle: Math.PI * 0.11,  minDarkness: 0.72, lengthMul: 0.60, widthMul: 1.0,  alphaMul: 1.0  },
-    ];
-
-    const cellSize = 3;
-    const gridW = Math.ceil(width / cellSize);
-    const gridH = Math.ceil(height / cellSize);
+    // Massive budget for high-end pencil detail (30,000 max)
+    const densityVal = Math.max(1, params.strokeDensity);
+    const rawCount = Math.floor((width * height * densityVal) / 80);
+    const maxStrokesTotal = Math.min(rawCount, 30000);
 
     // Pre-compute darkness
     const darknessMap = new Float32Array(width * height);
     for (let i = 0; i < width * height; i++) {
-        darknessMap[i] = 1.0 - luminance[i];
+        darknessMap[i] = Math.max(0, 1.0 - luminance[i]);
     }
 
+    // Artist Passes Configuration
+    const passes = [
+        // 0. Outline/Contour Pass: Strong lines following the shape
+        { type: 'outline', angle: 0, minDark: 0.1, maxStrokes: 0.15, length: 1.5, width: 1.0, alpha: 0.8 },
+        // 1-4. Hatching Passes: Organized shading
+        { type: 'hatch', angle: Math.PI * 0.15, minDark: 0.05, maxStrokes: 0.25, length: 1.0, width: 0.4, alpha: 0.6 },
+        { type: 'hatch', angle: Math.PI * 0.65, minDark: 0.22, maxStrokes: 0.25, length: 0.8, width: 0.5, alpha: 0.7 },
+        { type: 'hatch', angle: Math.PI * 0.40, minDark: 0.42, maxStrokes: 0.20, length: 0.6, width: 0.7, alpha: 0.8 },
+        { type: 'hatch', angle: Math.PI * 0.90, minDark: 0.65, maxStrokes: 0.15, length: 0.4, width: 0.9, alpha: 1.0 }
+    ];
+
+    const cellSize = 2; // Ultra-fine packing
+    const gridW = Math.ceil(width / cellSize);
+    const gridH = Math.ceil(height / cellSize);
     let idCounter = 0;
-    const stepSize = 2.0; // Fine step for smooth lines
-    const strokesPerPass = Math.floor(maxStrokes / passes.length);
 
-    for (const pass of passes) {
+    for (const passConfig of passes) {
+        const passMax = Math.floor(maxStrokesTotal * passConfig.maxStrokes);
         const visited = new Uint8Array(gridW * gridH);
-        // Slight per-pass angle variation for natural look
-        const hatchAngle = pass.angle + (rng.nextFloat() - 0.5) * 0.06;
+        
+        for (let i = 0; i < passMax; i++) {
+            let sx = Math.floor(rng.nextFloat() * width);
+            let sy = Math.floor(rng.nextFloat() * height);
+            let idx = sy * width + sx;
+            let dark = darknessMap[idx];
 
-        for (let i = 0; i < strokesPerPass; i++) {
-            let startX = Math.floor(rng.nextFloat() * width);
-            let startY = Math.floor(rng.nextFloat() * height);
-            let idx = startY * width + startX;
-            let darkness = darknessMap[idx];
-
-            // Find a point dark enough for this pass
-            if (darkness < pass.minDarkness) {
+            // Rejection Sampling: Focus on details and shadows
+            if (dark < passConfig.minDark) {
                 let found = false;
-                for (let j = 0; j < 30; j++) {
-                    startX = Math.floor(rng.nextFloat() * width);
-                    startY = Math.floor(rng.nextFloat() * height);
-                    idx = startY * width + startX;
-                    darkness = darknessMap[idx];
-                    if (darkness >= pass.minDarkness) {
-                        const ngx = Math.floor(startX / cellSize);
-                        const ngy = Math.floor(startY / cellSize);
-                        if (visited[ngy * gridW + ngx] < 6) {
+                for (let j = 0; j < 40; j++) {
+                    sx = Math.floor(rng.nextFloat() * width);
+                    sy = Math.floor(rng.nextFloat() * height);
+                    idx = sy * width + sx;
+                    dark = darknessMap[idx];
+                    if (dark >= passConfig.minDark) {
+                        const gx = Math.floor(sx / cellSize);
+                        const gy = Math.floor(sy / cellSize);
+                        if (visited[gy * gridW + gx] < 4) {
                             found = true;
                             break;
                         }
@@ -111,86 +107,56 @@ export function buildStrokes(
                 if (!found) continue;
             }
 
-            const gx = Math.floor(startX / cellSize);
-            const gy = Math.floor(startY / cellSize);
-            if (visited[gy * gridW + gx] >= 6) continue;
+            const gx = Math.floor(sx / cellSize);
+            const gy = Math.floor(sy / cellSize);
+            if (visited[gy * gridW + gx] >= 4) continue;
 
-            const localDarkness = darknessMap[idx];
-            const localMag = magnitude[idx];
+            // Final Tonal Props
+            const localDark = darknessMap[idx];
+            // Width: extremely thin (0.1 - 0.5 range)
+            // Width: extremely thin (0.1 - 0.5 range)
+            const wScale = (0.1 + localDark * 0.9) * passConfig.width;
+            const wMin = Math.max(0.05, params.widthMin * wScale);
+            const wMax = Math.max(0.1, params.widthMax * wScale);
+            
+            // Alpha
+            const alpha = Math.max(0.02, Math.min(0.9, localDark * localDark * passConfig.alpha));
 
-            // Stroke length: longer base for visible hatching lines
-            const baseLen = params.strokeLength * pass.lengthMul;
-            const lenVar = 0.6 + localDarkness * 0.4;
-            const adjustedLength = Math.max(12, Math.floor(baseLen * lenVar));
-
-            // Width: very thin for fine hatching, scaling with darkness
-            const widthScale = (0.15 + localDarkness * 0.85) * pass.widthMul;
-            const adjWidthMin = Math.max(0.1, params.widthMin * widthScale);
-            const adjWidthMax = Math.max(0.12, params.widthMax * widthScale);
-
-            // Alpha: gradual buildup for smooth tonal transitions
-            const baseAlpha = 0.05 + localDarkness * 0.7;
-            const strokeAlpha = Math.max(0.03, Math.min(0.85, baseAlpha * pass.alphaMul));
-
-            // Color: subtle source color tint
-            let strokeColor = { r: 40, g: 40, b: 40 };
+            // Color
+            let color = { r: 35, g: 35, b: 35 };
             if (imageData) {
-                const pixIdx = idx * 4;
-                const colorScale = 0.05 + localDarkness * 0.4;
-                strokeColor = {
-                    r: Math.max(5, Math.min(160, Math.floor(imageData[pixIdx] * colorScale))),
-                    g: Math.max(5, Math.min(160, Math.floor(imageData[pixIdx + 1] * colorScale))),
-                    b: Math.max(5, Math.min(160, Math.floor(imageData[pixIdx + 2] * colorScale)))
+                const pIdx = idx * 4;
+                const cScale = 0.05 + localDark * 0.4;
+                color = {
+                    r: Math.floor(imageData[pIdx] * cScale),
+                    g: Math.floor(imageData[pIdx+1] * cScale),
+                    b: Math.floor(imageData[pIdx+2] * cScale)
                 };
             }
 
             // Trace
-            const halfLen = Math.floor(adjustedLength / 2);
-            const fwd = traceHatching(
-                startX, startY, width, height, magnitude, direction,
-                params, rng, stepSize, 1, darknessMap,
-                halfLen, hatchAngle, pass.minDarkness
-            );
-            const bwd = traceHatching(
-                startX, startY, width, height, magnitude, direction,
-                params, rng, stepSize, -1, darknessMap,
-                halfLen, hatchAngle, pass.minDarkness
+            const steps = Math.floor(params.strokeLength * passConfig.length);
+            const points = traceArtistStroke(
+                sx, sy, width, height, magnitude, direction, 
+                params, rng, 1.8, darknessMap, steps, passConfig.angle, 
+                passConfig.type as 'outline' | 'hatch', passConfig.minDark
             );
 
-            // Combine backward (reversed) + forward
-            const pts: StrokePoint[] = [];
-            for (let b = bwd.length - 1; b > 0; b--) pts.push(bwd[b]);
-            for (const fp of fwd) pts.push(fp);
-
-            const totalLen = pts.length;
-            for (let p = 0; p < totalLen; p++) {
-                pts[p].t = totalLen > 1 ? p / (totalLen - 1) : 0;
-            }
-
-            if (pts.length > 2) {
-                for (const pt of pts) {
-                    const cgx = Math.floor(pt.x / cellSize);
-                    const cgy = Math.floor(pt.y / cellSize);
-                    if (cgx >= 0 && cgx < gridW && cgy >= 0 && cgy < gridH) {
-                        const ci = cgy * gridW + cgx;
-                        if (visited[ci] < 255) visited[ci]++;
+            if (points.length > 3) {
+                // Mark visited along the path
+                for (const p of points) {
+                    const cx = Math.floor(p.x / cellSize);
+                    const cy = Math.floor(p.y / cellSize);
+                    if (cx >= 0 && cx < gridW && cy >= 0 && cy < gridH) {
+                        visited[cy * gridW + cx]++;
                     }
                 }
 
                 strokes.push({
                     id: `s_${idCounter++}`,
-                    points: pts,
-                    style: {
-                        widthMin: adjWidthMin,
-                        widthMax: adjWidthMax,
-                        taper: params.pressureTaper,
-                        alpha: strokeAlpha,
-                        color: strokeColor
-                    },
-                    meta: {
-                        source: localMag > 0.15 ? 'edge' : 'hybrid',
-                        seedUsed: params.seed
-                    }
+                    points,
+                    style: { widthMin: wMin, widthMax: wMax, taper: params.pressureTaper, alpha, color },
+                    meta: { source: passConfig.type === 'outline' ? 'edge' : 'hybrid', seedUsed: params.seed }
                 });
             }
         }
@@ -200,101 +166,97 @@ export function buildStrokes(
 }
 
 /**
- * Trace hatching with form-following direction blending.
- * Near edges, strokes follow contours; in flat areas, straight hatching.
- * Very strong smoothing for clean disciplined lines.
+ * Advanced Dynamic Pressure Trace
+ * 
+ * Simulates how an artist starts a stroke with some pressure, 
+ * follows a form, and lifts the pencil as it enters lighter areas.
  */
-function traceHatching(
-    startX: number,
-    startY: number,
-    width: number,
-    height: number,
+function traceArtistStroke(
+    sx: number, sy: number,
+    width: number, height: number,
     magnitude: Float32Array,
     direction: Float32Array,
     params: LineParams,
     rng: PRNG,
     stepSize: number,
-    dirSign: number,
     darknessMap: Float32Array,
     maxSteps: number,
     hatchAngle: number,
-    minDarkness: number
+    type: 'outline' | 'hatch',
+    minDark: number
 ): StrokePoint[] {
-    const points: StrokePoint[] = [];
-    let cx = startX;
-    let cy = startY;
+    const pts: StrokePoint[] = [];
+    let cx = sx, cy = sy;
+    let prevDir = 0, initialized = false;
+    let brightStreak = 0;
 
-    const randFactor = (rng.nextFloat() * params.randomness) / 100;
-    const pathLength = Math.min(maxSteps, params.strokeLength) * (1 - randFactor);
-
-    points.push({ x: cx, y: cy, t: 0 });
-
-    let prevDir = 0;
-    let initialized = false;
-    let brightCount = 0;
-
-    for (let step = 0; step < pathLength; step++) {
-        const ix = Math.floor(cx);
-        const iy = Math.floor(cy);
-
+    // Build the stroke in one long flow (or split if needed, here one direction for croquis speed)
+    for (let s = 0; s < maxSteps; s++) {
+        const ix = Math.floor(cx), iy = Math.floor(cy);
         if (ix < 0 || ix >= width || iy < 0 || iy >= height) break;
 
-        const cIdx = iy * width + ix;
-        const localDarkness = darknessMap[cIdx];
-        const mag = magnitude[cIdx];
+        const idx = iy * width + ix;
+        const mag = magnitude[idx];
+        const dark = darknessMap[idx];
 
-        // Stop if entering area too bright for this pass
-        if (localDarkness < minDarkness * 0.4) {
-            brightCount++;
-            if (brightCount > 5) break;
+        // Lift pencil if it enters highlights
+        if (dark < minDark * 0.4) {
+            brightStreak++;
+            if (brightStreak > 4) break;
         } else {
-            brightCount = 0;
+            brightStreak = 0;
         }
 
-        // Direction: contour-following near edges, hatching in flat areas
-        const gradDir = (direction[cIdx] + Math.PI / 2) * dirSign;
-        let dir: number;
-
-        if (mag > 0.3) {
-            dir = gradDir;
-        } else if (mag > 0.08) {
-            const blend = (mag - 0.08) / 0.22;
-            dir = lerpAngle(hatchAngle * dirSign, gradDir, blend);
+        // Direction Selection
+        let targetDir: number;
+        if (type === 'outline') {
+            // Outline pass is more sensitive to form contours
+            targetDir = direction[idx] + Math.PI / 2;
         } else {
-            dir = hatchAngle * dirSign;
+            // Hatch pass blends between organized hatch and contours
+            const gradDir = direction[idx] + Math.PI / 2;
+            const blend = Math.min(1.0, mag * 2.5); // Use contours more if magnitude is high
+            targetDir = lerpAngle(hatchAngle, gradDir, blend);
         }
 
-        // Strong direction smoothing = disciplined flowing lines
+        // Inertia/Smoothing (Confidence of a stroke)
         if (initialized) {
-            let angleDiff = dir - prevDir;
-            while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
-            while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
-            dir = prevDir + angleDiff * 0.10; // Very strong smoothing
+            let diff = targetDir - prevDir;
+            while (diff > Math.PI) diff -= 2 * Math.PI;
+            while (diff < -Math.PI) diff += 2 * Math.PI;
+            targetDir = prevDir + diff * 0.08; // Very high inertia
         }
         initialized = true;
-        prevDir = dir;
+        prevDir = targetDir;
 
-        // Very subtle wobble for natural texture
-        const wobble = Math.sin(step * params.wobbleFreq * 0.015) * params.wobbleAmp * 0.08;
-        dir += wobble;
+        // Micro-wobble (Natural jitter)
+        const jitter = (rng.nextFloat() - 0.5) * params.wobbleAmp * 0.05;
+        targetDir += jitter;
 
-        cx += Math.cos(dir) * stepSize;
-        cy += Math.sin(dir) * stepSize;
+        // Dynamic Pressure Calculation (Darker = more pressure)
+        const pressure = Math.max(0.1, Math.min(1.0, dark * 1.2));
 
-        if (cx < 1 || cx >= width - 1 || cy < 1 || cy >= height - 1) break;
+        cx += Math.cos(targetDir) * stepSize;
+        cy += Math.sin(targetDir) * stepSize;
 
-        // Record every 3rd point for smooth Bézier curves
-        if (step % 3 === 0) {
-            points.push({ x: cx, y: cy, t: 0 });
+        if (s % 3 === 0) {
+            pts.push({ x: cx, y: cy, t: s / maxSteps, pressure });
         }
     }
 
-    return points;
+    // Add tapering to pressure at ends
+    const len = pts.length;
+    for (let i = 0; i < len; i++) {
+        const taper = Math.min(1.0, (i / (len * 0.15))) * Math.min(1.0, ((len - 1 - i) / (len * 0.15)));
+        pts[i].pressure *= (1 - params.pressureTaper) + params.pressureTaper * taper;
+    }
+
+    return pts;
 }
 
 function lerpAngle(a: number, b: number, t: number): number {
-    let diff = b - a;
-    while (diff > Math.PI) diff -= 2 * Math.PI;
-    while (diff < -Math.PI) diff += 2 * Math.PI;
-    return a + diff * t;
+    let d = b - a;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    return a + d * t;
 }
