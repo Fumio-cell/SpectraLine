@@ -2,9 +2,9 @@ import type { StrokePath } from './lines/tracer';
 import type { InkBlurParams } from './types';
 
 /**
- * Render strokes as smooth Bézier curves with variable width.
- * Each stroke is rendered as individual segments with lineWidth changing
- * along the path for a natural pen-and-ink look.
+ * Render strokes with per-stroke alpha for luminance-based tonal variation.
+ * Each stroke carries its own alpha value based on the source image's brightness
+ * at the stroke's origin point.
  */
 export function renderStrokes(
     ctx: CanvasRenderingContext2D,
@@ -20,28 +20,31 @@ export function renderStrokes(
     // Set up Bleed effect if requested
     if (isBleed) {
         ctx.filter = `blur(${bleedParams.bleedBlurPx}px)`;
-        ctx.globalAlpha = bleedParams.bleedOpacityPct / 100;
     } else {
         ctx.filter = 'none';
         ctx.shadowBlur = 0;
-        ctx.globalAlpha = 1.0;
     }
 
     for (const stroke of strokes) {
         if (stroke.points.length < 3) continue;
 
-        const { color } = stroke.style;
+        const { color, alpha } = stroke.style;
         ctx.strokeStyle = `rgb(${color.r},${color.g},${color.b})`;
 
-        // Optimize: Draw entire stroke in a single path to avoid freezing the main thread
-        // (Previously it called ctx.stroke() for every single segment, causing huge lag)
+        // Per-stroke alpha: combines stroke's luminance-based alpha with bleed opacity
+        if (isBleed) {
+            ctx.globalAlpha = alpha * (bleedParams.bleedOpacityPct / 100);
+        } else {
+            ctx.globalAlpha = alpha;
+        }
+
         const pts = stroke.points;
         const len = pts.length;
 
-        // Use average width for the stroke to maintain performance
-        let segWidth = stroke.style.widthMin + (stroke.style.widthMax - stroke.style.widthMin) * 0.65; // average taper factor
+        // Use per-stroke width (already luminance-adjusted by tracer)
+        let segWidth = stroke.style.widthMin + (stroke.style.widthMax - stroke.style.widthMin) * 0.65;
         if (isBleed) segWidth += bleedParams.bleedAmountPx;
-        segWidth = Math.max(0.3, segWidth);
+        segWidth = Math.max(0.2, segWidth);
 
         ctx.lineWidth = segWidth;
         ctx.beginPath();
@@ -50,13 +53,11 @@ export function renderStrokes(
             const p0 = pts[i];
             const p1 = pts[i + 1];
 
-            // Use quadratic Bézier with midpoints for smooth curves
             if (i === 0) {
                 ctx.moveTo(p0.x, p0.y);
                 ctx.lineTo(p1.x, p1.y);
             } else {
                 const prevP = pts[i - 1];
-                // Midpoint for smooth curve
                 const mx0 = (prevP.x + p0.x) / 2;
                 const my0 = (prevP.y + p0.y) / 2;
                 const mx1 = (p0.x + p1.x) / 2;
@@ -86,7 +87,7 @@ export function compositeLayers(
 ) {
     ctxOut.clearRect(0, 0, width, height);
 
-    // White background so lines are visible on dark UI
+    // White background
     ctxOut.fillStyle = '#ffffff';
     ctxOut.fillRect(0, 0, width, height);
 
@@ -117,6 +118,5 @@ export function compositeLayers(
         ctxOut.filter = 'none';
     }
 
-    // Ensure composite operation is reset
     ctxOut.globalCompositeOperation = 'source-over';
 }

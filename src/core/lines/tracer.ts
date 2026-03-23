@@ -3,7 +3,7 @@ import type { LineParams } from '../types';
 export interface StrokePoint {
     x: number;
     y: number;
-    t: number; // Normalized position (0 to 1) along the stroke
+    t: number;
 }
 
 export interface StrokePath {
@@ -22,7 +22,6 @@ export interface StrokePath {
     };
 }
 
-// Pseudo-random number generator for seeded randomness
 class PRNG {
     private seed: number;
     constructor(seed: number) { this.seed = seed % 2147483647; if (this.seed <= 0) this.seed += 2147483646; }
@@ -31,10 +30,12 @@ class PRNG {
 }
 
 /**
- * Build high-quality flowing strokes that trace along gradient flow fields.
- * Produces dense, long, smooth curves similar to pen-and-ink illustration style.
+ * Build strokes with luminance-aware density and width.
  * 
- * Performance-optimized: caps strokes at 3000, uses coarser grid, fewer retry attempts.
+ * Key principle: Light areas → fewer/thinner/lighter strokes (paper shows through = "light")
+ *               Dark areas → more/thicker/darker strokes (heavy ink = "shadow")
+ * 
+ * This creates natural-looking tonal variation in pen-and-ink style.
  */
 export function buildStrokes(
     width: number,
@@ -48,49 +49,69 @@ export function buildStrokes(
     const strokes: StrokePath[] = [];
     const rng = new PRNG(params.seed === 0 ? Math.floor(Math.random() * 10000) : params.seed);
 
-    // Density-based stroke count - capped more aggressively for performance
     const rawCount = Math.floor((width * height * params.strokeDensity) / 600);
     const maxStrokes = Math.min(rawCount, 3000);
 
-    // Coverage tracking with coarser grid for speed
     const cellSize = 4;
     const gridW = Math.ceil(width / cellSize);
     const gridH = Math.ceil(height / cellSize);
     const visited = new Uint8Array(gridW * gridH);
 
-    // Pre-compute luminance-based density map
+    // Density map: combines edge magnitude and darkness
+    // Dark areas get high density, bright areas get low density
     const densityMap = new Float32Array(width * height);
     for (let i = 0; i < width * height; i++) {
-        densityMap[i] = Math.max(magnitude[i], (1.0 - luminance[i]) * 0.6);
+        const darkness = 1.0 - luminance[i];
+        // Weight darkness much more heavily so tonal range is preserved
+        densityMap[i] = Math.max(magnitude[i] * 0.6, darkness * 0.8);
     }
 
     let idCounter = 0;
-    const stepSize = 4.0; // Larger step = fewer points per stroke = faster rendering
+    const stepSize = 4.0;
 
     for (let i = 0; i < maxStrokes; i++) {
-        // 1. Pick a random seed point
         let startX = Math.floor(rng.nextFloat() * width);
         let startY = Math.floor(rng.nextFloat() * height);
         let idx = startY * width + startX;
 
-        // Check density at this point
         let density = densityMap[idx];
+        const localLum = luminance[idx];
+
+        // === LUMINANCE-BASED REJECTION ===
+        // Bright areas: probabilistically reject strokes so paper stays white
+        // This is the key to expressing highlights/light
+        if (localLum > 0.4) {
+            // The brighter it is, the more likely we skip this stroke
+            // At luminance 0.4: 10% skip chance
+            // At luminance 0.7: 60% skip chance
+            // At luminance 0.9: 95% skip chance
+            const skipProb = Math.pow((localLum - 0.4) / 0.6, 1.5);
+            if (rng.nextFloat() < skipProb) continue;
+        }
+
         const gx = Math.floor(startX / cellSize);
         const gy = Math.floor(startY / cellSize);
         const gridIdx = gy * gridW + gx;
 
-        // Fewer retries for performance
-        if (density < params.edgeThreshold * 0.1 || visited[gridIdx] >= 5) {
+        if (density < params.edgeThreshold * 0.15 || visited[gridIdx] >= 5) {
             let found = false;
             for (let j = 0; j < 12; j++) {
                 startX = Math.floor(rng.nextFloat() * width);
                 startY = Math.floor(rng.nextFloat() * height);
                 idx = startY * width + startX;
                 density = densityMap[idx];
+                const newLum = luminance[idx];
+
+                // Also apply luminance rejection during retry
+                if (newLum > 0.4) {
+                    const skipProb = Math.pow((newLum - 0.4) / 0.6, 1.5);
+                    if (rng.nextFloat() < skipProb) continue;
+                }
+
                 const ngx = Math.floor(startX / cellSize);
                 const ngy = Math.floor(startY / cellSize);
                 const ngridIdx = ngy * gridW + ngx;
-                if (density >= params.edgeThreshold * 0.1 && visited[ngridIdx] < 5) {
+                if (density >= params.edgeThreshold * 0.15 && visited[ngridIdx] < 5) {
                     found = true;
                     break;
                 }
@@ -98,18 +119,36 @@ export function buildStrokes(
             if (!found) continue;
         }
 
-        // Get color from source image
-        let strokeColor = { r: 20, g: 20, b: 20 };
+        // Recompute luminance at final position
+        const finalLum = luminance[idx];
+
+        // === LUMINANCE-BASED COLOR ===
+        // Darker source → darker stroke, lighter source → lighter stroke
+        let strokeColor = { r: 30, g: 30, b: 30 };
         if (imageData) {
             const pixIdx = idx * 4;
+            // Use higher multiplier (0.55) to preserve color/tonal range
+            // Dark pixels stay dark, medium pixels become medium gray
+            const colorScale = 0.15 + (1.0 - finalLum) * 0.55;
             strokeColor = {
-                r: Math.max(0, Math.floor(imageData[pixIdx] * 0.3)),
-                g: Math.max(0, Math.floor(imageData[pixIdx + 1] * 0.3)),
-                b: Math.max(0, Math.floor(imageData[pixIdx + 2] * 0.3))
+                r: Math.max(0, Math.min(200, Math.floor(imageData[pixIdx] * colorScale))),
+                g: Math.max(0, Math.min(200, Math.floor(imageData[pixIdx + 1] * colorScale))),
+                b: Math.max(0, Math.min(200, Math.floor(imageData[pixIdx + 2] * colorScale)))
             };
         }
 
-        // 2. Trace the path in both directions from the seed point
+        // === LUMINANCE-BASED WIDTH ===
+        // Dark areas get thick strokes, light areas get thin strokes
+        const darkness = 1.0 - finalLum;
+        const widthScale = 0.3 + darkness * 0.7; // Range: 0.3 (lightest) to 1.0 (darkest)
+        const adjustedWidthMin = params.widthMin * widthScale;
+        const adjustedWidthMax = params.widthMax * widthScale;
+
+        // === LUMINANCE-BASED ALPHA ===
+        // Light areas are more transparent, dark areas are fully opaque
+        const strokeAlpha = Math.max(0.15, Math.min(1.0, 0.3 + darkness * 0.7));
+
+        // Trace path
         const forwardPoints = traceDirection(
             startX, startY, width, height, magnitude, direction,
             params, rng, stepSize, 1, densityMap, visited, gridW, cellSize
@@ -119,7 +158,6 @@ export function buildStrokes(
             params, rng, stepSize, -1, densityMap, visited, gridW, cellSize
         );
 
-        // Combine: backward (reversed) + forward
         const allPoints: StrokePoint[] = [];
         for (let b = backwardPoints.length - 1; b > 0; b--) {
             allPoints.push(backwardPoints[b]);
@@ -128,14 +166,12 @@ export function buildStrokes(
             allPoints.push(fp);
         }
 
-        // Normalize t values
         const totalLen = allPoints.length;
         for (let p = 0; p < totalLen; p++) {
             allPoints[p].t = totalLen > 1 ? p / (totalLen - 1) : 0;
         }
 
         if (allPoints.length > 2) {
-            // Mark cells as visited
             for (const pt of allPoints) {
                 const cgx = Math.floor(pt.x / cellSize);
                 const cgy = Math.floor(pt.y / cellSize);
@@ -149,10 +185,10 @@ export function buildStrokes(
                 id: `s_${idCounter++}`,
                 points: allPoints,
                 style: {
-                    widthMin: params.widthMin,
-                    widthMax: params.widthMax,
+                    widthMin: adjustedWidthMin,
+                    widthMax: adjustedWidthMax,
                     taper: params.pressureTaper,
-                    alpha: 1.0,
+                    alpha: strokeAlpha,
                     color: strokeColor
                 },
                 meta: { source: 'hybrid', seedUsed: params.seed }
@@ -165,7 +201,6 @@ export function buildStrokes(
 
 /**
  * Trace a single direction along the flow field.
- * Records every 6th point for performance.
  */
 function traceDirection(
     startX: number,
@@ -192,7 +227,6 @@ function traceDirection(
 
     points.push({ x: cx, y: cy, t: 0 });
 
-    // Smooth direction tracking
     let prevDir = 0;
     let initialized = false;
 
@@ -232,7 +266,6 @@ function traceDirection(
             if (densityMap[newIdx] < params.edgeThreshold * 0.05) break;
         }
 
-        // Record every 6th point for performance
         if (step % 6 === 0) {
             points.push({ x: cx, y: cy, t: 0 });
         }
