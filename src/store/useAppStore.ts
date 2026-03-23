@@ -47,7 +47,7 @@ const presets: Preset[] = [
         name: 'Clean Ink',
         params: {
             ...defaultParams,
-            lines: { ...defaultParams.lines, strokeDensity: 1.5, strokeLength: 120, wobbleAmp: 0.1, randomness: 3, widthMin: 0.3, widthMax: 1.0 },
+            lines: { ...defaultParams.lines, strokeDensity: 2.0, strokeLength: 200, wobbleAmp: 0.0, wobbleFreq: 0, randomness: 2, widthMin: 0.2, widthMax: 0.7 },
             inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 0, bleedBlurPx: 0, bleedOpacityPct: 0 }
         }
     },
