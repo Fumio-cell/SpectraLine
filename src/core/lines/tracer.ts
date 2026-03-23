@@ -30,12 +30,10 @@ class PRNG {
 }
 
 /**
- * Build strokes with luminance-aware density and width.
- * 
- * Key principle: Light areas → fewer/thinner/lighter strokes (paper shows through = "light")
- *               Dark areas → more/thicker/darker strokes (heavy ink = "shadow")
- * 
- * This creates natural-looking tonal variation in pen-and-ink style.
+ * Build strokes with strong luminance-aware density, width, and alpha.
+ *
+ * Light areas → very few thin faint strokes (white paper = highlights)
+ * Dark areas  → dense thick opaque strokes (heavy ink = shadows)
  */
 export function buildStrokes(
     width: number,
@@ -49,21 +47,19 @@ export function buildStrokes(
     const strokes: StrokePath[] = [];
     const rng = new PRNG(params.seed === 0 ? Math.floor(Math.random() * 10000) : params.seed);
 
-    const rawCount = Math.floor((width * height * params.strokeDensity) / 600);
-    const maxStrokes = Math.min(rawCount, 3000);
+    const rawCount = Math.floor((width * height * params.strokeDensity) / 500);
+    const maxStrokes = Math.min(rawCount, 3500);
 
     const cellSize = 4;
     const gridW = Math.ceil(width / cellSize);
     const gridH = Math.ceil(height / cellSize);
     const visited = new Uint8Array(gridW * gridH);
 
-    // Density map: combines edge magnitude and darkness
-    // Dark areas get high density, bright areas get low density
+    // Density map: darkness-weighted
     const densityMap = new Float32Array(width * height);
     for (let i = 0; i < width * height; i++) {
         const darkness = 1.0 - luminance[i];
-        // Weight darkness much more heavily so tonal range is preserved
-        densityMap[i] = Math.max(magnitude[i] * 0.6, darkness * 0.8);
+        densityMap[i] = Math.max(magnitude[i] * 0.5, darkness * darkness * 1.2);
     }
 
     let idCounter = 0;
@@ -77,15 +73,14 @@ export function buildStrokes(
         let density = densityMap[idx];
         const localLum = luminance[idx];
 
-        // === LUMINANCE-BASED REJECTION ===
-        // Bright areas: probabilistically reject strokes so paper stays white
-        // This is the key to expressing highlights/light
-        if (localLum > 0.4) {
-            // The brighter it is, the more likely we skip this stroke
-            // At luminance 0.4: 10% skip chance
-            // At luminance 0.7: 60% skip chance
-            // At luminance 0.9: 95% skip chance
-            const skipProb = Math.pow((localLum - 0.4) / 0.6, 1.5);
+        // === AGGRESSIVE LUMINANCE REJECTION ===
+        // Start rejecting very early (lum > 0.2) with steep curve
+        // lum 0.2 → ~2% skip   |  lum 0.4 → ~20% skip
+        // lum 0.6 → ~52% skip  |  lum 0.8 → ~85% skip
+        // lum 0.95 → ~98% skip
+        if (localLum > 0.2) {
+            const normalized = (localLum - 0.2) / 0.8;
+            const skipProb = Math.pow(normalized, 1.3);
             if (rng.nextFloat() < skipProb) continue;
         }
 
@@ -93,25 +88,27 @@ export function buildStrokes(
         const gy = Math.floor(startY / cellSize);
         const gridIdx = gy * gridW + gx;
 
-        if (density < params.edgeThreshold * 0.15 || visited[gridIdx] >= 5) {
+        // Higher density threshold to skip very flat/bright areas
+        if (density < 0.02 || visited[gridIdx] >= 5) {
             let found = false;
-            for (let j = 0; j < 12; j++) {
+            for (let j = 0; j < 15; j++) {
                 startX = Math.floor(rng.nextFloat() * width);
                 startY = Math.floor(rng.nextFloat() * height);
                 idx = startY * width + startX;
                 density = densityMap[idx];
                 const newLum = luminance[idx];
 
-                // Also apply luminance rejection during retry
-                if (newLum > 0.4) {
-                    const skipProb = Math.pow((newLum - 0.4) / 0.6, 1.5);
+                // Apply luminance rejection during retry too
+                if (newLum > 0.2) {
+                    const normalized = (newLum - 0.2) / 0.8;
+                    const skipProb = Math.pow(normalized, 1.3);
                     if (rng.nextFloat() < skipProb) continue;
                 }
 
                 const ngx = Math.floor(startX / cellSize);
                 const ngy = Math.floor(startY / cellSize);
                 const ngridIdx = ngy * gridW + ngx;
-                if (density >= params.edgeThreshold * 0.15 && visited[ngridIdx] < 5) {
+                if (density >= 0.02 && visited[ngridIdx] < 5) {
                     found = true;
                     break;
                 }
@@ -119,43 +116,45 @@ export function buildStrokes(
             if (!found) continue;
         }
 
-        // Recompute luminance at final position
         const finalLum = luminance[idx];
+        const darkness = Math.max(0, 1.0 - finalLum);
+
+        // === LUMINANCE-BASED STROKE LENGTH ===
+        // Dark areas get full-length strokes, bright areas get shorter ones
+        const lengthScale = 0.3 + darkness * 0.7;
+        const adjustedLength = Math.max(10, Math.floor(params.strokeLength * lengthScale));
 
         // === LUMINANCE-BASED COLOR ===
-        // Darker source → darker stroke, lighter source → lighter stroke
         let strokeColor = { r: 30, g: 30, b: 30 };
         if (imageData) {
             const pixIdx = idx * 4;
-            // Use higher multiplier (0.55) to preserve color/tonal range
-            // Dark pixels stay dark, medium pixels become medium gray
-            const colorScale = 0.15 + (1.0 - finalLum) * 0.55;
+            // Scale color based on darkness - preserve tonal range
+            const colorScale = 0.1 + darkness * 0.6;
             strokeColor = {
-                r: Math.max(0, Math.min(200, Math.floor(imageData[pixIdx] * colorScale))),
-                g: Math.max(0, Math.min(200, Math.floor(imageData[pixIdx + 1] * colorScale))),
-                b: Math.max(0, Math.min(200, Math.floor(imageData[pixIdx + 2] * colorScale)))
+                r: Math.max(0, Math.min(220, Math.floor(imageData[pixIdx] * colorScale))),
+                g: Math.max(0, Math.min(220, Math.floor(imageData[pixIdx + 1] * colorScale))),
+                b: Math.max(0, Math.min(220, Math.floor(imageData[pixIdx + 2] * colorScale)))
             };
         }
 
         // === LUMINANCE-BASED WIDTH ===
-        // Dark areas get thick strokes, light areas get thin strokes
-        const darkness = 1.0 - finalLum;
-        const widthScale = 0.3 + darkness * 0.7; // Range: 0.3 (lightest) to 1.0 (darkest)
-        const adjustedWidthMin = params.widthMin * widthScale;
-        const adjustedWidthMax = params.widthMax * widthScale;
+        const widthScale = 0.15 + darkness * 0.85;
+        const adjustedWidthMin = Math.max(0.2, params.widthMin * widthScale);
+        const adjustedWidthMax = Math.max(0.3, params.widthMax * widthScale);
 
         // === LUMINANCE-BASED ALPHA ===
-        // Light areas are more transparent, dark areas are fully opaque
-        const strokeAlpha = Math.max(0.15, Math.min(1.0, 0.3 + darkness * 0.7));
+        const strokeAlpha = Math.max(0.08, Math.min(1.0, darkness * darkness * 1.5 + 0.08));
 
-        // Trace path
+        // Trace path with adjusted length
         const forwardPoints = traceDirection(
             startX, startY, width, height, magnitude, direction,
-            params, rng, stepSize, 1, densityMap, visited, gridW, cellSize
+            params, rng, stepSize, 1, densityMap, luminance,
+            Math.floor(adjustedLength / 2)
         );
         const backwardPoints = traceDirection(
             startX, startY, width, height, magnitude, direction,
-            params, rng, stepSize, -1, densityMap, visited, gridW, cellSize
+            params, rng, stepSize, -1, densityMap, luminance,
+            Math.floor(adjustedLength / 2)
         );
 
         const allPoints: StrokePoint[] = [];
@@ -200,7 +199,9 @@ export function buildStrokes(
 }
 
 /**
- * Trace a single direction along the flow field.
+ * Trace direction with magnitude-based early termination.
+ * Strokes stop when entering very low-magnitude flat areas,
+ * preventing long straight-line artifacts.
  */
 function traceDirection(
     startX: number,
@@ -214,21 +215,21 @@ function traceDirection(
     stepSize: number,
     dirSign: number,
     densityMap: Float32Array,
-    _visited: Uint8Array,
-    _gridW: number,
-    _cellSize: number
+    luminance: Float32Array,
+    maxSteps: number
 ): StrokePoint[] {
     const points: StrokePoint[] = [];
     let cx = startX;
     let cy = startY;
 
     const randFactor = (rng.nextFloat() * params.randomness) / 100;
-    const pathLength = params.strokeLength * (1 - randFactor);
+    const pathLength = Math.min(maxSteps, params.strokeLength) * (1 - randFactor);
 
     points.push({ x: cx, y: cy, t: 0 });
 
     let prevDir = 0;
     let initialized = false;
+    let lowMagCount = 0; // Track consecutive low-magnitude steps
 
     for (let step = 0; step < pathLength; step++) {
         const ix = Math.floor(cx);
@@ -237,6 +238,18 @@ function traceDirection(
         if (ix < 0 || ix >= width || iy < 0 || iy >= height) break;
 
         const cIdx = iy * width + ix;
+
+        // === EARLY TERMINATION IN FLAT/BRIGHT AREAS ===
+        // Stop tracing if we enter very low-density or very bright areas
+        const localDensity = densityMap[cIdx];
+        const localLum = luminance[cIdx];
+
+        if (localDensity < 0.01 || localLum > 0.92) {
+            lowMagCount++;
+            if (lowMagCount > 3) break; // Stop after 3 consecutive low-density steps
+        } else {
+            lowMagCount = 0;
+        }
 
         let dir = direction[cIdx] + Math.PI / 2;
         dir *= dirSign;
@@ -266,7 +279,7 @@ function traceDirection(
             if (densityMap[newIdx] < params.edgeThreshold * 0.05) break;
         }
 
-        if (step % 6 === 0) {
+        if (step % 5 === 0) {
             points.push({ x: cx, y: cy, t: 0 });
         }
     }
