@@ -56,20 +56,25 @@ export async function exportLinesAsPNG(
 
                 console.log(`[Export] Preview ${prevWidth}x${prevHeight} -> Export ${outWidth}x${outHeight}, geoScale: ${geoScaleX.toFixed(3)}x${geoScaleY.toFixed(3)}`);
 
-                // Deep copy and scale strokes
-                const scaledStrokes: StrokePath[] = strokes.map(s => ({
-                    ...s,
-                    points: s.points.map(p => ({
-                        ...p,
-                        x: p.x * geoScaleX,
-                        y: p.y * geoScaleY
-                    })),
-                    style: {
-                        ...s.style,
-                        widthMin: s.style.widthMin * geoScaleAvg,
-                        widthMax: s.style.widthMax * geoScaleAvg
+                // 5. Scale strokes for output resolution
+                const scaledStrokes: StrokePath[] = strokes.map(s => {
+                    const scaledPoints = new Float32Array(s.points.length);
+                    for (let k = 0; k < s.points.length; k += 4) {
+                        scaledPoints[k] = s.points[k] * geoScaleX;
+                        scaledPoints[k+1] = s.points[k+1] * geoScaleY;
+                        scaledPoints[k+2] = s.points[k+2]; // t doesn't change
+                        scaledPoints[k+3] = s.points[k+3]; // pressure doesn't change
                     }
-                }));
+                    return {
+                        ...s,
+                        points: scaledPoints,
+                        style: {
+                            ...s.style,
+                            widthMin: s.style.widthMin * geoScaleAvg,
+                            widthMax: s.style.widthMax * geoScaleAvg
+                        }
+                    };
+                });
 
                 // Adjust ink blur params for scale
                 const scaledBleedParams: InkBlurParams = {
@@ -79,16 +84,20 @@ export async function exportLinesAsPNG(
                     finalBlurPx: params.inkBlur.finalBlurPx * geoScaleAvg,
                 };
 
-                // 4. White background
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(0, 0, outWidth, outHeight);
-
-                // 5. Render in async chunks to prevent UI freeze and OOM crash
+                // 6. Setup rendering phases
                 const BATCH_SIZE = 100;
                 let offset = 0;
                 const useBleed = scaledBleedParams.bleedOpacityPct > 0;
+                
+                // Bleed is rendered to a temporary canvas to apply blur ONCE
+                const canvasBleed = useBleed ? document.createElement('canvas') : null;
+                if (canvasBleed) {
+                    canvasBleed.width = outWidth;
+                    canvasBleed.height = outHeight;
+                }
+                const bleedCtx = canvasBleed?.getContext('2d');
 
-                // Phases: bleed first (if enabled), then lines on top
+                // Phases: 'bleed' then 'lines'
                 type Phase = 'bleed' | 'lines';
                 let phase: Phase = useBleed ? 'bleed' : 'lines';
 
@@ -100,33 +109,38 @@ export async function exportLinesAsPNG(
                         const end = Math.min(offset + BATCH_SIZE, scaledStrokes.length);
                         const batch = scaledStrokes.slice(offset, end);
 
-                        if (phase === 'bleed') {
-                            if (scaledBleedParams.bleedMode === 'Multiply') {
-                                ctx.globalCompositeOperation = 'multiply';
-                            } else {
-                                ctx.globalCompositeOperation = 'source-over';
-                            }
-                            renderStrokes(ctx, batch, outWidth, outHeight, true, scaledBleedParams);
+                        if (phase === 'bleed' && bleedCtx) {
+                            renderStrokes(bleedCtx, batch, outWidth, outHeight, true, scaledBleedParams);
                         } else {
-                            ctx.globalCompositeOperation = 'source-over';
                             renderStrokes(ctx, batch, outWidth, outHeight, false, scaledBleedParams);
                         }
 
                         offset = end;
 
                         if (offset < scaledStrokes.length) {
-                            // More strokes to render in this phase
                             setTimeout(drawBatch, 0);
                         } else if (phase === 'bleed') {
-                            // Switch from bleed phase to lines phase
+                            // Bleed phase done: composite onto main canvas with blur and opacity
+                            if (canvasBleed) {
+                                if (scaledBleedParams.bleedMode === 'Multiply') {
+                                    ctx.globalCompositeOperation = 'multiply';
+                                } else {
+                                    ctx.globalCompositeOperation = 'source-over';
+                                }
+                                
+                                if (scaledBleedParams.bleedBlurPx > 0) {
+                                    ctx.filter = `blur(${scaledBleedParams.bleedBlurPx}px)`;
+                                }
+                                ctx.drawImage(canvasBleed, 0, 0);
+                                ctx.filter = 'none';
+                                ctx.globalCompositeOperation = 'source-over';
+                            }
+                            
                             phase = 'lines';
                             offset = 0;
-                            ctx.globalCompositeOperation = 'source-over';
                             setTimeout(drawBatch, 0);
                         } else {
-                            // All done - apply final blur if needed
-                            ctx.globalCompositeOperation = 'source-over';
-
+                            // All phases done
                             if (scaledBleedParams.finalBlurPx > 0) {
                                 const tempCanvas = document.createElement('canvas');
                                 tempCanvas.width = outWidth;
@@ -156,7 +170,11 @@ export async function exportLinesAsPNG(
                     }
                 };
 
-                // Kick off the first batch
+                // White background
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, outWidth, outHeight);
+
+                // Kick off
                 setTimeout(drawBatch, 0);
             } catch (err: any) {
                 reject(new Error(`Export setup error: ${err.message}`));

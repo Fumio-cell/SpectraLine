@@ -44,7 +44,7 @@ export class AppEngine {
             } else if (res.type === 'STROKES_READY') {
                 const strokes: StrokePath[] = res.strokes;
                 this.lastStrokes = strokes;
-                console.log(`[Engine] Received ${strokes.length} strokes, avg ${Math.round(strokes.reduce((s, st) => s + st.points.length, 0) / strokes.length)} pts each`);
+                console.log(`[Engine] Received ${strokes.length} strokes, avg ${Math.round(strokes.reduce((s, st) => s + st.points.length, 0) / (strokes.length * 4))} pts each`);
                 if (this.currentParams) {
                     this.renderBatched(strokes, this.currentParams);
                 }
@@ -217,14 +217,16 @@ export class AppEngine {
         ctxOut.fillRect(0, 0, width, height);
 
         const useBleed = params.inkBlur.bleedOpacityPct > 0;
-        const BATCH_SIZE = 800;
+        const BATCH_SIZE = 200; // Reduced from 800 for much better responsiveness
         let offset = 0;
+        let batchCount = 0;
 
-        console.time('[Engine] Render');
+        console.time(`[Engine] Render (${strokes.length} strokes)`);
 
         const drawBatch = () => {
             if (currentRender !== this.renderAbort) return;
 
+            batchCount++;
             const end = Math.min(offset + BATCH_SIZE, strokes.length);
             const batch = strokes.slice(offset, end);
 
@@ -242,8 +244,8 @@ export class AppEngine {
                 requestAnimationFrame(drawBatch);
             } else {
                 compositeLayers(ctxOut, this.canvasLines, this.canvasBleed, width, height, params.inkBlur);
-                console.timeEnd('[Engine] Render');
-                console.log(`[Engine] Done: ${strokes.length} strokes`);
+                console.timeEnd(`[Engine] Render (${strokes.length} strokes)`);
+                console.log(`[Engine] Rendering complete in ${batchCount} batches.`);
                 if (this.onRenderComplete) this.onRenderComplete();
             }
         };

@@ -27,48 +27,23 @@ export async function signOut() {
 
 export async function getUserStatus() {
   try {
-    if (!supabase) return { user: null, isPro: false };
+    if (!supabase) return { user: { id: 'local-user', email: 'Local Mode' }, isPro: true };
     const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError) throw userError;
-    if (!user) return { user: null, isPro: false };
-
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('is_pro')
-      .eq('id', user.id)
-      .single();
-
-    if (error && error.code !== 'PGRST116') {
-      console.warn('Profile fetch error:', error.message);
+    
+    // Always return isPro: true for local use
+    if (userError || !user) {
+      return { user: null, isPro: true };
     }
 
     return { 
       user, 
-      isPro: data?.is_pro || false 
+      isPro: true 
     };
   } catch (err: any) {
-    console.error('getUserStatus failed:', err.message);
-    return { user: null, isPro: false };
+    return { user: null, isPro: true };
   }
 }
 
 export function openLemonSqueezyCheckout(userId: string | null = null) {
-  // TODO: SpectraLine の実際のチェックアウトURLを設定する
-  let checkoutUrl = 'https://yourstore.lemonsqueezy.com/checkout/buy/...';
-  
-  if (userId) {
-    checkoutUrl += (checkoutUrl.includes('?') ? '&' : '?') + `checkout[custom][user_id]=${userId}`;
-  }
-  
-  if ((window as any).createLemonSqueezy) {
-    (window as any).createLemonSqueezy();
-  }
-  
-  const LemonSqueezy = (window as any).LemonSqueezy;
-  if (typeof LemonSqueezy !== 'undefined') {
-    LemonSqueezy.Url.Open(checkoutUrl);
-  } else {
-    const win = window.open(checkoutUrl, '_blank');
-    if (win) win.focus();
-  }
+  console.log('Checkout disabled for local use');
 }

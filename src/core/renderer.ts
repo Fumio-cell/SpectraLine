@@ -18,19 +18,13 @@ export function renderStrokes(
 ) {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    ctx.filter = 'none';
 
-    if (isBleed) {
-        ctx.filter = `blur(${bleedParams.bleedBlurPx}px)`;
-    } else {
-        ctx.filter = 'none';
-    }
-
-    // Optimization: avoid frequent state changes
     let currentStyle = '';
 
     for (const stroke of strokes) {
         const pts = stroke.points;
-        const len = pts.length;
+        const len = pts.length / 4;
         if (len < 4) continue;
 
         const { color, alpha } = stroke.style;
@@ -41,33 +35,45 @@ export function renderStrokes(
             currentStyle = style;
         }
 
-        // Draw segments with point-to-point width/pressure
-        // We use quadratic curve for segments to keep it smooth
+        let lastW = -1;
+        let started = false;
+
         for (let i = 1; i < len - 2; i++) {
-            const p0 = pts[i-1];
-            const p1 = pts[i];
-            const p2 = pts[i+1];
+            const i0 = (i - 1) * 4;
+            const i1 = i * 4;
+            const i2 = (i + 1) * 4;
+
+            const p1x = pts[i1], p1y = pts[i1+1], p1p = pts[i1+3];
+            const p2x = pts[i2], p2y = pts[i2+1], p2p = pts[i2+3];
             
-            // Average pressure for this segment
-            const pressure = (p1.pressure + p2.pressure) / 2;
+            const pressure = (p1p + p2p) / 2;
             let w = (stroke.style.widthMin + (stroke.style.widthMax - stroke.style.widthMin) * pressure);
             if (isBleed) w += bleedParams.bleedAmountPx;
+            w = Math.max(0.1, w);
+
+            if (!started || Math.abs(w - lastW) > 0.1) {
+                if (started) ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.lineWidth = w;
+                lastW = w;
+                started = true;
+                
+                const mxPrev = (pts[i0] + p1x) / 2;
+                const myPrev = (pts[i0 + 1] + p1y) / 2;
+                ctx.moveTo(mxPrev, myPrev);
+            }
             
-            ctx.lineWidth = Math.max(0.1, w);
-            ctx.beginPath();
-            
-            const mx = (p1.x + p2.x) / 2;
-            const my = (p1.y + p2.y) / 2;
-            const mxPrev = (p0.x + p1.x) / 2;
-            const myPrev = (p0.y + p1.y) / 2;
-            
-            ctx.moveTo(mxPrev, myPrev);
-            ctx.quadraticCurveTo(p1.x, p1.y, mx, my);
+            const mx = (p1x + p2x) / 2;
+            const my = (p1y + p2y) / 2;
+            ctx.quadraticCurveTo(p1x, p1y, mx, my);
+        }
+        
+        if (started) {
             ctx.stroke();
         }
     }
 
-    ctx.filter = 'none';
     ctx.globalAlpha = 1.0;
 }
 
@@ -89,7 +95,12 @@ export function compositeLayers(
         ctxOut.globalCompositeOperation = 'source-over';
     }
 
+    // Apply blur ONCE during compositing instead of per-stroke
+    if (bleedParams.bleedOpacityPct > 0 && bleedParams.bleedBlurPx > 0) {
+        ctxOut.filter = `blur(${bleedParams.bleedBlurPx}px)`;
+    }
     ctxOut.drawImage(canvasBleed, 0, 0);
+    ctxOut.filter = 'none';
 
     ctxOut.globalCompositeOperation = 'source-over';
     ctxOut.drawImage(canvasLines, 0, 0);

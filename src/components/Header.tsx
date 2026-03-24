@@ -12,52 +12,29 @@ export const Header: React.FC = () => {
         const client = supabase;
         if (!client) return;
 
-        client.auth.getUser().then(({ data: { user: foundUser } }) => {
+        client.auth.getUser().then(({ data: { user: foundUser } }: any) => {
             setUser(foundUser);
-            if (foundUser) {
-                client
-                    .from('profiles')
-                    .select('is_pro')
-                    .eq('id', foundUser.id)
-                    .single()
-                    .then(({ data }) => {
-                        const pro = !!(data as any)?.is_pro;
-                        const finalPro = pro || foundUser?.email === 'fumiotashiro@gmail.com';
-                        (window as any).__isPro = finalPro;
-                        setIsPro(finalPro);
-                        window.dispatchEvent(new CustomEvent('auth:status', { detail: { user: foundUser, isPro: finalPro } }));
-                        setTimeout(() => window.dispatchEvent(new CustomEvent('auth:status', { detail: { user: foundUser, isPro: finalPro } })), 200);
-                    });
-            }
+            // Force Pro status regardless of profile
+            const finalPro = true;
+            (window as any).__isPro = finalPro;
+            setIsPro(finalPro);
+            window.dispatchEvent(new CustomEvent('auth:status', { detail: { user: foundUser, isPro: finalPro } }));
+            setTimeout(() => window.dispatchEvent(new CustomEvent('auth:status', { detail: { user: foundUser, isPro: finalPro } })), 200);
         });
 
-        const { data: authListener } = client.auth.onAuthStateChange(async (_event, session) => {
+        const { data: authListener } = client.auth.onAuthStateChange(async (_event: any, session: any) => {
             const currentUser = session?.user ?? null;
             setUser(currentUser);
-            if (currentUser) {
-                const { data } = await client
-                    .from('profiles')
-                    .select('is_pro')
-                    .eq('id', currentUser.id)
-                    .single();
-                const pro = !!(data as any)?.is_pro;
-                const finalPro = pro || currentUser?.email === 'fumiotashiro@gmail.com';
-                (window as any).__isPro = finalPro;
-                setIsPro(finalPro);
-                window.dispatchEvent(new CustomEvent('auth:status', { detail: { user: currentUser, isPro: finalPro } }));
-                setTimeout(() => window.dispatchEvent(new CustomEvent('auth:status', { detail: { user: currentUser, isPro: finalPro } })), 200);
-            } else {
-                setIsPro(false);
-                window.dispatchEvent(new CustomEvent('auth:status', { detail: { user: null, isPro: false } }));
-            }
+            // Force Pro status regardless of session
+            const finalPro = true;
+            (window as any).__isPro = finalPro;
+            setIsPro(finalPro);
+            window.dispatchEvent(new CustomEvent('auth:status', { detail: { user: currentUser, isPro: finalPro } }));
+            setTimeout(() => window.dispatchEvent(new CustomEvent('auth:status', { detail: { user: currentUser, isPro: finalPro } })), 200);
         });
-
-        const handleBuyPro = () => openLemonSqueezyCheckout();
-        window.addEventListener('app:buyPro', handleBuyPro);
 
         return () => {
             authListener?.subscription.unsubscribe();
-            window.removeEventListener('app:buyPro', handleBuyPro);
         };
     }, []);
 
@@ -81,25 +58,26 @@ export const Header: React.FC = () => {
             <div className="header-right">
                 {user ? (
                     <div className="user-profile">
-                        <div className={`pro-badge ${isPro ? 'active' : ''}`}>
+                        <div className="pro-badge active">
                             <Zap className="w-3 h-3" />
-                            {isPro ? 'PRO' : 'FREE'}
+                            PRO
                         </div>
                         <span className="user-email">{user.email}</span>
-                        {!isPro && (
-                            <button onClick={() => openLemonSqueezyCheckout()} className="upgrade-btn">
-                                Upgrade
-                            </button>
-                        )}
                         <button onClick={logout} className="icon-btn" title="Logout">
                             <LogOut className="w-4 h-4" />
                         </button>
                     </div>
                 ) : (
-                    <button onClick={login} className="login-btn">
-                        <LogIn className="w-4 h-4" />
-                        Login
-                    </button>
+                    <div className="user-profile">
+                        <div className="pro-badge active">
+                            <Zap className="w-3 h-3" />
+                            PRO
+                        </div>
+                        <span className="user-email">Local Mode</span>
+                        <button onClick={login} className="icon-btn" title="Login for Sync">
+                            <LogIn className="w-4 h-4" />
+                        </button>
+                    </div>
                 )}
             </div>
 

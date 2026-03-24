@@ -26,8 +26,9 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
     // App Engine reference
     const engineRef = useRef<AppEngine | null>(null);
 
-    // Track previous maps params to avoid unnecessary full rebuilds
+    // Track previous params to avoid unnecessary full rebuilds
     const prevMapsParamsRef = useRef<string>('');
+    const prevLinesParamsRef = useRef<string>('');
     const prevFileRef = useRef<File | null>(null);
 
     // Memoize maps params key to detect real changes
@@ -63,73 +64,63 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
         }
     }, [onEngineReady]);
 
-    // Effect: When image changes OR maps params change → full rebuild
+    // Unified Effect: Handles all processing triggers in a coordinated way
     useEffect(() => {
         if (!engineRef.current || !input.file) return;
 
         const fileChanged = input.file !== prevFileRef.current;
         const mapsChanged = mapsParamsKey !== prevMapsParamsRef.current;
+        const linesChanged = linesParamsKey !== prevLinesParamsRef.current;
 
-        if (!fileChanged && !mapsChanged) return;
+        // Skip if nothing substantial changed
+        if (!fileChanged && !mapsChanged && !linesChanged) return;
 
+        // Update refs
         prevFileRef.current = input.file;
         prevMapsParamsRef.current = mapsParamsKey;
+        prevLinesParamsRef.current = linesParamsKey;
 
         let isCancelled = false;
-        setProcessing(true, 'Building maps...');
-
+        
+        // Use a single debounced entry point
         const timeout = setTimeout(() => {
             if (isCancelled || !engineRef.current) return;
 
-            engineRef.current.onMapsReady = () => {
-                if (isCancelled) return;
-                setProcessing(true, 'Tracing strokes...');
-                engineRef.current?.buildStrokes(params);
-            };
+            if (fileChanged || mapsChanged) {
+                // Full rebuild (Maps + Strokes)
+                setProcessing(true, 'Building maps...');
+                
+                engineRef.current.onMapsReady = () => {
+                    if (isCancelled) return;
+                    setProcessing(true, 'Tracing strokes...');
+                    engineRef.current?.buildStrokes(params);
+                };
 
-            engineRef.current.onRenderComplete = () => {
-                if (isCancelled) return;
-                setProcessing(false);
-            };
+                engineRef.current.onRenderComplete = () => {
+                    if (isCancelled) return;
+                    setProcessing(false);
+                };
 
-            engineRef.current.processImage(input.file!, params);
-        }, fileChanged ? 100 : 400);
+                engineRef.current.processImage(input.file!, params);
+            } else if (linesChanged) {
+                // Incremental rebuild (Strokes only)
+                setProcessing(true, 'Retracing strokes...');
+
+                engineRef.current.onRenderComplete = () => {
+                    if (isCancelled) return;
+                    setProcessing(false);
+                };
+
+                engineRef.current.buildStrokes(params);
+            }
+        }, fileChanged ? 100 : 450); // Slightly more aggressive debounce for params
 
         return () => {
             isCancelled = true;
             clearTimeout(timeout);
         };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [input.file, mapsParamsKey]);
-
-    // Effect: When ONLY line/ink params change → rebuild strokes only (skip maps)
-    useEffect(() => {
-        if (!engineRef.current || !input.file) return;
-
-        // Skip if we haven't done a full build yet
-        if (!prevMapsParamsRef.current) return;
-
-        let isCancelled = false;
-
-        const timeout = setTimeout(() => {
-            if (isCancelled || !engineRef.current) return;
-
-            setProcessing(true, 'Retracing strokes...');
-
-            engineRef.current.onRenderComplete = () => {
-                if (isCancelled) return;
-                setProcessing(false);
-            };
-
-            engineRef.current.buildStrokes(params);
-        }, 350);
-
-        return () => {
-            isCancelled = true;
-            clearTimeout(timeout);
-        };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [linesParamsKey]);
+    }, [input.file, mapsParamsKey, linesParamsKey]);
 
 
     return (

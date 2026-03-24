@@ -90,8 +90,6 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
                 throw new Error('Maps must be built before strokes');
             }
 
-            self.postMessage({ type: 'PROGRESS', requestId: req.requestId, status: 'ok', progress: 0.1 } as WorkerResponse);
-
             const strokes = buildStrokes(
                 currentMaps.width,
                 currentMaps.height,
@@ -102,13 +100,15 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
                 currentMaps.imageData
             );
 
-            // Use Structured Clone (postMessage default) instead of JSON serialization
+            // Collect all Float32Array buffers for zero-copy transfer
+            const pointBuffers = strokes.map(s => s.points.buffer);
+
             self.postMessage({
                 type: 'STROKES_READY',
                 requestId: req.requestId,
                 status: 'ok',
                 strokes: strokes
-            } as WorkerResponse);
+            } as WorkerResponse, pointBuffers as any);
         }
     } catch (err: any) {
         self.postMessage({
