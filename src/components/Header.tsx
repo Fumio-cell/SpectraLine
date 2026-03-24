@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { supabase, openLemonSqueezyCheckout } from '../lib/commercial';
+import { supabase } from '../lib/commercial';
 import { LogIn, LogOut, Zap, Info, X } from 'lucide-react';
 
 export const Header: React.FC = () => {
     const [user, setUser] = useState<any>(null);
-    const [isPro, setIsPro] = useState(false);
+    const [, setIsPro] = useState(false);
     const [showInfo, setShowInfo] = useState(false);
 
     useEffect(() => {

@@ -44,6 +44,6 @@ export async function getUserStatus() {
   }
 }
 
-export function openLemonSqueezyCheckout(userId: string | null = null) {
+export function openLemonSqueezyCheckout(_userId: string | null = null) {
   console.log('Checkout disabled for local use');
 }
