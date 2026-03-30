@@ -38,21 +38,94 @@ export function buildStrokes(
     const strokes: StrokePath[] = [];
     const rng = new PRNG(params.seed === 0 ? Math.floor(Math.random() * 10000) : params.seed);
 
-    const densityVal = Math.max(1, params.strokeDensity);
-    const rawCount = Math.floor((width * height * densityVal) / 80);
-    const maxStrokesTotal = Math.min(rawCount, 15000);
+    const densityVal = Math.max(0.1, params.strokeDensity);
+    const rawCount = Math.floor((width * height * densityVal) / 120);
+    // 上限を15,000本から150,000本へ大幅解放し、密度パラメータが正しく反映されるようにする
+    const maxStrokesTotal = Math.min(rawCount, 150000);
 
     const darknessMap = new Float32Array(width * height);
     for (let i = 0; i < width * height; i++) {
         darknessMap[i] = Math.max(0, 1.0 - luminance[i]);
     }
 
+    const EXACT_EDGE_THRESHOLD = 0.20; 
+    const MAX_EXACT_EDGES = 150000;
+    
+    // 画像サイズに応じて「全体へ均等にまばらに」点を打つための確率
+    // ピクセル全数に対してMAX_EXACT_EDGESがどれくらいかを求め、
+    // 描画密度(densityVal)と掛け合わせて確率を算出します。
+    // これにより画面の途中で突然スキャンが切れる（真横にぶった切られる）のを防止します。
+    const targetEdges = Math.min(MAX_EXACT_EDGES, maxStrokesTotal * 1.5);
+    const dropProbability = Math.min(1.0, (targetEdges / (width * height * 0.1)) * (densityVal / 5.0));
+    
+    let exactCount = 0;
+
+    for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+            const idx = y * width + x;
+            if (magnitude[idx] >= EXACT_EDGE_THRESHOLD) {
+                // 均等にエッジを間引く（画面全体に行き渡らせる）
+                if (rng.nextFloat() > dropProbability) continue;
+                
+                // 既にストローク（オブジェクト生成）限界なら終了
+                if (exactCount >= MAX_EXACT_EDGES) break;
+                
+                const mag = Math.min(1.0, magnitude[idx] * 1.5);
+                
+                // エッジに沿ったごく短い線分（点描のように機能する）
+                const angle = direction[idx] + Math.PI / 2;
+                // Magnitudeが強いほど少し線の長さを伸ばして滑らかにする
+                const len = 1.0 + mag * 3.0; 
+                const dx = Math.cos(angle) * len;
+                const dy = Math.sin(angle) * len;
+                
+                // renderer.ts は 3点(len < 4)以下のだとスキップしないが、念のため4点構成にする
+                // [x, y, t, p] のまとまり
+                const pts = new Float32Array([
+                    x - dx*0.5, y - dy*0.5, 0.0, mag * 0.8,
+                    x, y, 0.5, mag,
+                    x + dx*0.5, y + dy*0.5, 1.0, mag * 0.8,
+                    x + dx, y + dy, 1.0, 0.0
+                ]);
+                
+                let color = { r: 15, g: 15, b: 20 };
+                if (imageData) {
+                    const pIdx = idx * 4;
+                    // 暗い部分のクロッキー鉛筆色
+                    color = {
+                        r: Math.floor(imageData[pIdx] * 0.2),
+                        g: Math.floor(imageData[pIdx+1] * 0.2),
+                        b: Math.floor(imageData[pIdx+2] * 0.2)
+                    };
+                }
+
+                strokes.push({
+                    id: `exact_${exactCount}`,
+                    points: pts,
+                    style: { 
+                        widthMin: Math.max(0.1, params.widthMin * 0.5), 
+                        widthMax: Math.max(0.3, params.widthMax * 1.2), 
+                        taper: 0.8, 
+                        alpha: 0.95, 
+                        color 
+                    },
+                    meta: { source: 'edge', seedUsed: params.seed }
+                });
+                
+                exactCount++;
+            }
+        }
+        if (exactCount >= MAX_EXACT_EDGES) break;
+    }
+
     const passes = [
-        { type: 'outline', angle: 0, minDark: 0.1, maxStrokes: 0.15, length: 1.5, width: 1.0, alpha: 0.8 },
-        { type: 'hatch', angle: Math.PI * 0.15, minDark: 0.05, maxStrokes: 0.25, length: 1.0, width: 0.4, alpha: 0.6 },
-        { type: 'hatch', angle: Math.PI * 0.65, minDark: 0.22, maxStrokes: 0.25, length: 0.8, width: 0.5, alpha: 0.7 },
-        { type: 'hatch', angle: Math.PI * 0.40, minDark: 0.42, maxStrokes: 0.20, length: 0.6, width: 0.7, alpha: 0.8 },
-        { type: 'hatch', angle: Math.PI * 0.90, minDark: 0.65, maxStrokes: 0.15, length: 0.4, width: 0.9, alpha: 1.0 }
+        // 形を抜き出すための決定的な「強いエッジ（輪郭）」パス (長くて力強い線)
+        { type: 'edge_trace', angle: 0, minMag: 0.08, minDark: 0.0, maxStrokes: 0.25, length: 3.5, width: 1.2, alpha: 0.95 },
+        // シャドウ・ハッチング（影）パス (明るい部分から暗い部分まで網掛けを作り、塊感を出す)
+        { type: 'hatch', angle: Math.PI * 0.15, minMag: 0.0, minDark: 0.05, maxStrokes: 0.30, length: 1.8, width: 0.4, alpha: 0.5 },
+        { type: 'hatch', angle: Math.PI * 0.70, minMag: 0.0, minDark: 0.15, maxStrokes: 0.20, length: 1.2, width: 0.5, alpha: 0.6 },
+        { type: 'hatch', angle: Math.PI * 0.45, minMag: 0.0, minDark: 0.30, maxStrokes: 0.15, length: 0.8, width: 0.7, alpha: 0.8 },
+        { type: 'hatch', angle: Math.PI * 0.85, minMag: 0.0, minDark: 0.50, maxStrokes: 0.10, length: 0.6, width: 0.9, alpha: 1.0 }
     ];
 
     const cellSize = 2;
@@ -69,25 +142,47 @@ export function buildStrokes(
             let sy = Math.floor(rng.nextFloat() * height);
             let idx = sy * width + sx;
             let dark = darknessMap[idx];
+            let mag = magnitude[idx];
 
-            if (dark < passConfig.minDark) {
-                let found = false;
-                for (let j = 0; j < 40; j++) {
-                    sx = Math.floor(rng.nextFloat() * width);
-                    sy = Math.floor(rng.nextFloat() * height);
-                    idx = sy * width + sx;
-                    dark = darknessMap[idx];
-                    if (dark >= passConfig.minDark) {
-                        const gx = Math.floor(sx / cellSize);
-                        const gy = Math.floor(sy / cellSize);
-                        if (visited[gy * gridW + gx] < 4) {
+            let found = false;
+            // --- Source Mode に応じたパスのフィルタリング ---
+            // 'Contours' モードなら、内部のストロークロジック(Edges/Hatch)は走らせない
+            if (params.sourceMode === 'Contours') continue;
+            // 'Edges' モードなら、Hatch(陰影)パスは走らせない
+            if (params.sourceMode === 'Edges' && passConfig.type === 'hatch') continue;
+
+            // 輪郭スキャン（edge_trace）の場合は、暗さではなくエッジ強度（magnitude）を最優先で始点を決める
+            if (passConfig.type === 'edge_trace') {
+                if (mag >= passConfig.minMag) found = true;
+                else {
+                    for (let j = 0; j < 50; j++) {
+                        sx = Math.floor(rng.nextFloat() * width);
+                        sy = Math.floor(rng.nextFloat() * height);
+                        idx = sy * width + sx;
+                        if (magnitude[idx] >= passConfig.minMag) {
                             found = true;
                             break;
                         }
                     }
                 }
-                if (!found) continue;
+            } else {
+                // ハッチング（陰影塗り）の場合は暗さを優先
+                if (dark >= passConfig.minDark) found = true;
+                else {
+                    for (let j = 0; j < 40; j++) {
+                        sx = Math.floor(rng.nextFloat() * width);
+                        sy = Math.floor(rng.nextFloat() * height);
+                        idx = sy * width + sx;
+                        dark = darknessMap[idx];
+                        if (dark >= passConfig.minDark && magnitude[idx] >= passConfig.minMag) {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
             }
+
+            if (!found) continue;
 
             const gx = Math.floor(sx / cellSize);
             const gy = Math.floor(sy / cellSize);
@@ -114,7 +209,7 @@ export function buildStrokes(
             const points = traceArtistStroke(
                 sx, sy, width, height, magnitude, direction, 
                 params, rng, 1.8, darknessMap, steps, passConfig.angle, 
-                passConfig.type as 'outline' | 'hatch', passConfig.minDark
+                passConfig.type as 'edge_trace' | 'hatch', passConfig.minDark
             );
 
             if (points.length > 12) { // Minimum 4 points (4 * 3 = 12 floats)
@@ -130,7 +225,7 @@ export function buildStrokes(
                     id: `s_${idCounter++}`,
                     points,
                     style: { widthMin: wMin, widthMax: wMax, taper: params.pressureTaper, alpha, color },
-                    meta: { source: passConfig.type === 'outline' ? 'edge' : 'hybrid', seedUsed: params.seed }
+                    meta: { source: passConfig.type === 'edge_trace' ? 'edge' : 'hybrid', seedUsed: params.seed }
                 });
             }
         }
@@ -153,7 +248,7 @@ function traceArtistStroke(
     darknessMap: Float32Array,
     maxSteps: number,
     hatchAngle: number,
-    type: 'outline' | 'hatch',
+    type: 'edge_trace' | 'outline' | 'hatch',
     minDark: number
 ): Float32Array {
     const raw: number[] = [];
@@ -169,15 +264,21 @@ function traceArtistStroke(
         const mag = magnitude[idx];
         const dark = darknessMap[idx];
 
-        if (dark < minDark * 0.4) {
+        if (dark < minDark * 0.4 && type !== 'edge_trace') {
             brightStreak++;
             if (brightStreak > 4) break;
         } else {
             brightStreak = 0;
         }
 
+        // --- ストロークがエッジから外れたら早期終了（輪郭追跡専用） ---
+        if (type === 'edge_trace' && mag < 0.05) {
+            break;
+        }
+
         let targetDir: number;
-        if (type === 'outline') {
+        if (type === 'edge_trace') {
+            // エッジの接線方向に直進させる（contour lines）
             targetDir = direction[idx] + Math.PI / 2;
         } else {
             const gradDir = direction[idx] + Math.PI / 2;

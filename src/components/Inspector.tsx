@@ -61,7 +61,7 @@ const Inspector = () => {
                 </div>
             </AccordionSection>
 
-            <AccordionSection title="3. Maps" defaultExpanded>
+            <AccordionSection title="3. Maps">
                 <div className="control-group" style={{
                     padding: '8px',
                     borderRadius: '6px',
@@ -257,7 +257,7 @@ const Inspector = () => {
                     Export Lines
                 </button>
                 <button
-                    style={{ marginTop: '0.5rem', backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-primary)', width: '100%', padding: '0.75rem', border: '1px solid var(--border-color)' }}
+                    style={{ marginTop: '0.5rem', backgroundColor: 'var(--accent-color)', opacity: 0.8, color: '#fff', width: '100%', padding: '0.75rem', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 500 }}
                     onClick={() => {
                         window.dispatchEvent(new CustomEvent('app:exportMap'));
                     }}

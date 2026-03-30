@@ -48,7 +48,8 @@ const presets: Preset[] = [
         params: {
             ...defaultParams,
             maps: { ...defaultParams.maps, gradientGain: 2.5 },
-            lines: { ...defaultParams.lines, strokeDensity: 4.5, strokeLength: 120, wobbleAmp: 0.0, wobbleFreq: 0, randomness: 1, widthMin: 0.1, widthMax: 0.4, pressureTaper: 0.4 },
+            // アナログの滲みを消し、不要なハッチング網掛けを省いて「エッジ抽出（輪郭）のみ」をクリーンに描画する
+            lines: { ...defaultParams.lines, sourceMode: 'Edges', strokeDensity: 3.5, strokeLength: 40, wobbleAmp: 0.0, wobbleFreq: 0, randomness: 1, widthMin: 0.1, widthMax: 0.5, pressureTaper: 0.3 },
             inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 0, bleedBlurPx: 0, bleedOpacityPct: 0 }
         }
     },
@@ -58,7 +59,8 @@ const presets: Preset[] = [
         params: {
             ...defaultParams,
             maps: { ...defaultParams.maps, gradientGain: 2.8 },
-            lines: { ...defaultParams.lines, strokeDensity: 6.0, strokeLength: 140, widthMin: 0.08, widthMax: 0.35, wobbleAmp: 0.02, wobbleFreq: 0.2, randomness: 2, pressureTaper: 0.5 },
+            // ハッチングの長さを大幅に短く（140->60）し、鉛筆の粗いストローク感を表現する
+            lines: { ...defaultParams.lines, sourceMode: 'Hybrid', strokeDensity: 4.0, strokeLength: 60, widthMin: 0.08, widthMax: 0.35, wobbleAmp: 0.02, wobbleFreq: 0.2, randomness: 2, pressureTaper: 0.5 },
             inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 0.1, bleedBlurPx: 0.15, bleedOpacityPct: 3 }
         }
     },
@@ -68,7 +70,8 @@ const presets: Preset[] = [
         params: {
             ...defaultParams,
             maps: { ...defaultParams.maps, contoursEnabled: true, contourLevels: 24 },
-            lines: { ...defaultParams.lines, sourceMode: 'Contours', strokeDensity: 1.2, wobbleAmp: 0.4, randomness: 8 },
+            // 等高線を主体にするため、ランダムストロークの密度を下げて邪魔にならないようにする
+            lines: { ...defaultParams.lines, sourceMode: 'Hybrid', strokeDensity: 0.2, wobbleAmp: 0.4, randomness: 8 },
             inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 1, bleedBlurPx: 1, bleedOpacityPct: 10 }
         }
     },

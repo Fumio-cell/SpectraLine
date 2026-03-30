@@ -108,12 +108,12 @@ export const Header: React.FC = () => {
                     color: #7c5cfc;
                 }
                 .brand-icon {
-                    width: 26px;
-                    height: 26px;
+                    width: 32px;
+                    height: 32px;
                 }
                 .toolkit-name {
-                    font-size: 17px;
-                    font-weight: 700;
+                    font-size: 20px;
+                    font-weight: 800;
                     letter-spacing: -0.02em;
                     color: #fff;
                 }
@@ -121,11 +121,13 @@ export const Header: React.FC = () => {
                     color: rgba(255, 255, 255, 0.2);
                     font-weight: 300;
                     margin: 0 0.5rem;
+                    font-size: 20px;
                 }
                 .app-name {
-                    color: rgba(255, 255, 255, 0.7);
-                    font-size: 17px;
-                    font-weight: 500;
+                    color: rgba(255, 255, 255, 0.85);
+                    font-size: 20px;
+                    font-weight: 600;
+                    letter-spacing: -0.01em;
                 }
                 .user-profile {
                     display: flex;
