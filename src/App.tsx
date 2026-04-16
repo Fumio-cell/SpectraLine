@@ -14,6 +14,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<ViewTab>('Lines');
   const [engine, setEngine] = useState<AppEngine | null>(null);
   const [userStatus, setUserStatus] = useState<{ user: any, isPro: boolean }>({ user: null, isPro: false });
+  const [isDragging, setIsDragging] = useState(false);
   
   const activePresetId = useAppStore(state => state.activePresetId);
   const applyPreset = useAppStore(state => state.applyPreset);
@@ -88,9 +89,51 @@ function App() {
     };
   }, [engine, userStatus]);
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+        useAppStore.getState().setInput(file);
+    }
+  };
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: '100vw', height: '100vh', overflow: 'hidden', backgroundColor: 'var(--bg-color)' }}>
+    <div 
+        style={{ display: 'flex', flexDirection: 'column', width: '100vw', height: '100vh', overflow: 'hidden', backgroundColor: 'var(--bg-color)' }}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+    >
       <Header />
+      {isDragging && (
+          <div style={{
+              position: 'fixed',
+              top: 0, left: 0, right: 0, bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.8)',
+              zIndex: 9999,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backdropFilter: 'blur(10px)',
+              pointerEvents: 'none'
+          }}>
+              <h2 style={{ color: 'white', fontSize: '2rem', letterSpacing: '2px', fontWeight: 300 }}>
+                  Drop Image to Process
+              </h2>
+          </div>
+      )}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
       {/* Left Panel */}
       <div style={{ width: '280px', minWidth: '280px', borderRight: '1px solid var(--panel-border)', backgroundColor: 'var(--panel-bg)', overflowY: 'auto' }}>
