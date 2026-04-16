@@ -112,6 +112,7 @@ const presets: Preset[] = [
 interface AppState {
     manifest: ProjectManifest;
     activePresetId: string;
+    previewQuality: 'Live' | 'High';
     isProcessing: boolean;
     processingStage: string;
     setManifest: (update: Partial<ProjectManifest>) => void;
@@ -120,6 +121,7 @@ interface AppState {
     applyPreset: (presetId: string) => void;
     resetProject: () => void;
     setProcessing: (isProcessing: boolean, stage?: string) => void;
+    setPreviewQuality: (quality: 'Live' | 'High') => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -133,6 +135,7 @@ export const useAppStore = create<AppState>((set) => ({
         presets: presets
     },
     activePresetId: 'default',
+    previewQuality: 'Live',
     isProcessing: false,
     processingStage: '',
 
@@ -189,5 +192,6 @@ export const useAppStore = create<AppState>((set) => ({
         }
     })),
 
-    setProcessing: (isProcessing, stage = '') => set({ isProcessing, processingStage: stage })
+    setProcessing: (isProcessing, stage = '') => set({ isProcessing, processingStage: stage }),
+    setPreviewQuality: (previewQuality) => set({ previewQuality })
 }));

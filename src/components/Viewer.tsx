@@ -15,6 +15,8 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
 
     const input = useAppStore(state => state.manifest.input);
     const params = useAppStore(state => state.manifest.params);
+    const previewQuality = useAppStore(state => state.previewQuality);
+    const setPreviewQuality = useAppStore(state => state.setPreviewQuality);
     const isProcessing = useAppStore(state => state.isProcessing);
     const processingStage = useAppStore(state => state.processingStage);
     const setProcessing = useAppStore(state => state.setProcessing);
@@ -36,9 +38,10 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
         return JSON.stringify({
             maps: params.maps,
             sourceMode: params.lines.sourceMode,
-            edgeThreshold: params.lines.edgeThreshold
+            edgeThreshold: params.lines.edgeThreshold,
+            quality: previewQuality
         });
-    }, [params.maps, params.lines.sourceMode, params.lines.edgeThreshold]);
+    }, [params.maps, params.lines.sourceMode, params.lines.edgeThreshold, previewQuality]);
 
     // Memoize lines params key
     const linesParamsKey = useMemo(() => {
@@ -91,6 +94,12 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
         const timeout = setTimeout(() => {
             if (isCancelled || !engineRef.current) return;
 
+            const activeParams = {
+                ...params,
+                preview: { ...params.preview, previewMaxEdge: previewQuality === 'Live' ? 512 : params.preview.previewMaxEdge },
+                lines: { ...params.lines, strokeDensity: previewQuality === 'Live' ? Math.min(params.lines.strokeDensity, 1.0) : params.lines.strokeDensity }
+            };
+
             if (fileChanged || mapsChanged) {
                 // Full rebuild (Maps + Strokes)
                 setProcessing(true, 'Building maps...');
@@ -98,7 +107,7 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
                 engineRef.current.onMapsReady = () => {
                     if (isCancelled) return;
                     setProcessing(true, 'Tracing strokes...');
-                    engineRef.current?.buildStrokes(params);
+                    engineRef.current?.buildStrokes(activeParams);
                 };
 
                 engineRef.current.onRenderComplete = () => {
@@ -106,7 +115,7 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
                     setProcessing(false);
                 };
 
-                engineRef.current.processImage(input.file!, params);
+                engineRef.current.processImage(input.file!, activeParams);
             } else if (linesChanged) {
                 // Incremental rebuild (Strokes only)
                 setProcessing(true, 'Retracing strokes...');
@@ -116,7 +125,7 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
                     setProcessing(false);
                 };
 
-                engineRef.current.buildStrokes(params);
+                engineRef.current.buildStrokes(activeParams);
             }
         }, fileChanged ? 100 : 450); // Slightly more aggressive debounce for params
 
@@ -160,6 +169,17 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
                 >
                     <LayoutGrid size={16} />
                 </button>
+
+                <div style={{ width: '1px', height: '20px', backgroundColor: 'var(--border-color)', margin: '0 8px' }}></div>
+
+                <select 
+                    value={previewQuality} 
+                    onChange={(e) => setPreviewQuality(e.target.value as any)}
+                    style={{ padding: '2px 8px', borderRadius: '4px', background: 'rgba(255,255,255,0.1)', color: 'var(--text-main)', border: '1px solid var(--panel-border)', fontSize: '0.75rem', outline: 'none' }}
+                >
+                    <option value="Live">Live Proxies (Fast)</option>
+                    <option value="High">Full Quality</option>
+                </select>
 
                 {/* Processing indicator */}
                 {isProcessing && (
