@@ -19,7 +19,12 @@ export interface LineParams {
     pressureTaper: number;
     wobbleAmp: number;
     wobbleFreq: number;
+    waveAmp: number;
+    waveFreq: number;
+    roughness: number;
     randomness: number;
+    blendMode: 'normal' | 'multiply' | 'screen';
+    colorMode: 'Image' | 'Monochrome' | 'Prism';
     seed: number;
 }
 

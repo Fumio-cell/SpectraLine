@@ -56,18 +56,24 @@ function App() {
       }
 
       try {
+        useAppStore.getState().setProcessing(true, 'Exporting high-res lines...');
         await engine.exportPNG(params);
       } catch (err: any) {
         alert(`Export failed: ${err.message}`);
+      } finally {
+        useAppStore.getState().setProcessing(false);
       }
     };
 
     const handleExportMap = async () => {
       if (!engine) return;
       try {
+        useAppStore.getState().setProcessing(true, 'Exporting maps...');
         await engine.exportMapPNG();
       } catch (err: any) {
         alert(`Export map failed: ${err.message}`);
+      } finally {
+        useAppStore.getState().setProcessing(false);
       }
     };
 

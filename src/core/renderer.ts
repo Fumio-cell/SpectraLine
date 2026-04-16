@@ -14,11 +14,20 @@ export function renderStrokes(
     _width: number,
     _height: number,
     isBleed: boolean,
-    bleedParams: InkBlurParams
+    bleedParams: InkBlurParams,
+    lineBlendMode: 'normal' | 'multiply' | 'screen' = 'normal'
 ) {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.filter = 'none';
+    
+    if (isBleed) {
+        ctx.globalCompositeOperation = 'source-over'; // bleed logic is handled in compositeLayers
+    } else {
+        if (lineBlendMode === 'multiply') ctx.globalCompositeOperation = 'multiply';
+        else if (lineBlendMode === 'screen') ctx.globalCompositeOperation = 'screen';
+        else ctx.globalCompositeOperation = 'source-over';
+    }
 
     let currentStyle = '';
 

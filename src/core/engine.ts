@@ -11,6 +11,7 @@ export class AppEngine {
     private canvasMaps: HTMLCanvasElement;
     private currentParams?: Params;
     private renderAbort: number = 0;
+    private currentWorkerRequestId: string = '';
     private lastStrokes: StrokePath[] = [];
     private currentFile?: File;
 
@@ -30,6 +31,11 @@ export class AppEngine {
         this.worker = new Worker(new URL('./worker/processor.ts', import.meta.url), { type: 'module' });
         this.worker.onmessage = (e) => {
             const res = e.data;
+            if (res.requestId !== this.currentWorkerRequestId) {
+                console.log(`[Engine] Ignored obsolete worker message: ${res.type} (${res.requestId})`);
+                return;
+            }
+
             if (res.type === 'MAPS_READY') {
                 const { width, height, gradientMapBuffer } = res.maps;
                 if (gradientMapBuffer) {
@@ -84,9 +90,12 @@ export class AppEngine {
             this.canvasOut.width = pWidth;
             this.canvasOut.height = pHeight;
 
+            const reqId = 'map_' + Date.now();
+            this.currentWorkerRequestId = reqId;
+
             this.worker?.postMessage({
                 type: 'BUILD_MAPS',
-                requestId: 'map_' + Date.now(),
+                requestId: reqId,
                 input: {
                     imageBuffer: imageData.data.buffer,
                     width: pWidth,
@@ -103,9 +112,11 @@ export class AppEngine {
     public buildStrokes(params: Params) {
         this.currentParams = params;
         console.log('[Engine] Building strokes...');
+        const reqId = 'strk_' + Date.now();
+        this.currentWorkerRequestId = reqId;
         this.worker?.postMessage({
             type: 'BUILD_STROKES',
-            requestId: 'strk_' + Date.now(),
+            requestId: reqId,
             params: params
         });
     }
@@ -231,11 +242,11 @@ export class AppEngine {
             const batch = strokes.slice(offset, end);
 
             // Draw lines (always)
-            renderStrokes(ctxLines, batch, width, height, false, params.inkBlur);
+            renderStrokes(ctxLines, batch, width, height, false, params.inkBlur, params.lines.blendMode);
 
             // Draw bleed ONLY if enabled
             if (useBleed) {
-                renderStrokes(ctxBleed, batch, width, height, true, params.inkBlur);
+                renderStrokes(ctxBleed, batch, width, height, true, params.inkBlur, params.lines.blendMode);
             }
 
             offset = end;

@@ -110,9 +110,9 @@ export async function exportLinesAsPNG(
                         const batch = scaledStrokes.slice(offset, end);
 
                         if (phase === 'bleed' && bleedCtx) {
-                            renderStrokes(bleedCtx, batch, outWidth, outHeight, true, scaledBleedParams);
+                            renderStrokes(bleedCtx, batch, outWidth, outHeight, true, scaledBleedParams, params.lines.blendMode);
                         } else {
-                            renderStrokes(ctx, batch, outWidth, outHeight, false, scaledBleedParams);
+                            renderStrokes(ctx, batch, outWidth, outHeight, false, scaledBleedParams, params.lines.blendMode);
                         }
 
                         offset = end;
@@ -157,6 +157,7 @@ export async function exportLinesAsPNG(
                             console.log(`[Export] Converting to PNG blob...`);
 
                             canvas.toBlob((blob) => {
+                                cleanup(canvas, canvasBleed);
                                 if (blob) {
                                     console.log(`[Export] PNG blob created: ${(blob.size / 1024).toFixed(1)} KB`);
                                     resolve(blob);
@@ -166,6 +167,7 @@ export async function exportLinesAsPNG(
                             }, 'image/png');
                         }
                     } catch (err: any) {
+                        cleanup(canvas, canvasBleed);
                         reject(new Error(`Export render error: ${err.message}`));
                     }
                 };
@@ -177,11 +179,29 @@ export async function exportLinesAsPNG(
                 // Kick off
                 setTimeout(drawBatch, 0);
             } catch (err: any) {
+                // We don't have access to canvas references in this outer try-catch without lifting them, 
+                // but if an error occurs early, they usually haven't consumed big memory yet.
+                // We'll call cleanup() without canvas refs to ensure objUrl is revoked.
+                cleanup();
                 reject(new Error(`Export setup error: ${err.message}`));
             }
         };
 
-        img.onerror = () => reject(new Error('Failed to load original image for export.'));
-        img.src = URL.createObjectURL(originalImage);
+        const objUrl = URL.createObjectURL(originalImage);
+        let cleanupDone = false;
+        
+        const cleanup = (cMain?: HTMLCanvasElement, cBleed?: HTMLCanvasElement | null) => {
+            if (cleanupDone) return;
+            URL.revokeObjectURL(objUrl);
+            if (cMain) { cMain.width = 0; cMain.height = 0; }
+            if (cBleed) { cBleed.width = 0; cBleed.height = 0; }
+            cleanupDone = true;
+        };
+
+        img.onerror = () => {
+            cleanup();
+            reject(new Error('Failed to load original image for export.'));
+        };
+        img.src = objUrl;
     });
 }

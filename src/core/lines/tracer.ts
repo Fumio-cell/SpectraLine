@@ -89,7 +89,11 @@ export function buildStrokes(
                 ]);
                 
                 let color = { r: 15, g: 15, b: 20 };
-                if (imageData) {
+                if (params.colorMode === 'Prism') {
+                    color = hslToRgb(((direction[idx] + Math.PI) / (Math.PI * 2)) % 1.0, 1.0, 0.55);
+                } else if (params.colorMode === 'Monochrome') {
+                    color = { r: 15, g: 15, b: 20 };
+                } else if (imageData) {
                     const pIdx = idx * 4;
                     // 暗い部分のクロッキー鉛筆色
                     color = {
@@ -195,7 +199,12 @@ export function buildStrokes(
             const alpha = Math.max(0.02, Math.min(0.9, localDark * localDark * passConfig.alpha));
 
             let color = { r: 35, g: 35, b: 35 };
-            if (imageData) {
+            if (params.colorMode === 'Prism') {
+                const gradDir = direction[idx] + Math.PI / 2;
+                color = hslToRgb(((gradDir + Math.PI) / (Math.PI * 2)) % 1.0, 1.0, 0.6);
+            } else if (params.colorMode === 'Monochrome') {
+                color = { r: 35, g: 35, b: 35 };
+            } else if (imageData) {
                 const pIdx = idx * 4;
                 const cScale = 0.05 + localDark * 0.4;
                 color = {
@@ -300,11 +309,32 @@ function traceArtistStroke(
 
         const pressure = Math.max(0.1, Math.min(1.0, dark * 1.2));
 
+        let waveOffsetX = 0;
+        let waveOffsetY = 0;
+        if (params.waveAmp && params.waveAmp > 0) {
+            const normalDir = targetDir + Math.PI / 2;
+            const wave = Math.sin(s * (params.waveFreq || 0.1)) * params.waveAmp;
+            waveOffsetX = Math.cos(normalDir) * wave;
+            waveOffsetY = Math.sin(normalDir) * wave;
+        }
+
         cx += Math.cos(targetDir) * stepSize;
         cy += Math.sin(targetDir) * stepSize;
 
         if (s % 3 === 0) {
-            raw.push(cx, cy, s / maxSteps, pressure);
+            let jx = 0;
+            let jy = 0;
+            let pNoise = 1.0;
+            
+            if (params.roughness && params.roughness > 0) {
+                // Spatial jitter (paper bumpiness)
+                jx = (rng.nextFloat() - 0.5) * params.roughness * 1.5;
+                jy = (rng.nextFloat() - 0.5) * params.roughness * 1.5;
+                // Pressure jitter (scratches / dry spots)
+                pNoise = 1.0 - (rng.nextFloat() * params.roughness * 0.15);
+            }
+            
+            raw.push(cx + waveOffsetX + jx, cy + waveOffsetY + jy, s / maxSteps, Math.max(0, pressure * pNoise));
         }
     }
 
@@ -323,4 +353,30 @@ function lerpAngle(a: number, b: number, t: number): number {
     while (d > Math.PI) d -= 2 * Math.PI;
     while (d < -Math.PI) d += 2 * Math.PI;
     return a + d * t;
+}
+
+function hslToRgb(h: number, s: number, l: number): { r: number, g: number, b: number } {
+    let r, g, b;
+    if (s === 0) {
+        r = g = b = l; // achromatic
+    } else {
+        const hue2rgb = (p: number, q: number, t: number) => {
+            if (t < 0) t += 1;
+            if (t > 1) t -= 1;
+            if (t < 1/6) return p + (q - p) * 6 * t;
+            if (t < 1/2) return q;
+            if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+            return p;
+        };
+        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        const p = 2 * l - q;
+        
+        // Ensure h is properly bounded positive [0, 1) before calculating
+        h = (h % 1.0 + 1.0) % 1.0;
+
+        r = hue2rgb(p, q, h + 1/3);
+        g = hue2rgb(p, q, h);
+        b = hue2rgb(p, q, h - 1/3);
+    }
+    return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
 }

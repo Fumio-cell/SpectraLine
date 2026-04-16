@@ -46,13 +46,18 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
             strokeDensity: params.lines.strokeDensity,
             randomness: params.lines.randomness,
             wobbleAmp: params.lines.wobbleAmp,
+            waveAmp: params.lines.waveAmp,
+            waveFreq: params.lines.waveFreq,
+            roughness: params.lines.roughness,
+            blendMode: params.lines.blendMode,
+            colorMode: params.lines.colorMode,
             strokeLength: params.lines.strokeLength,
             widthMin: params.lines.widthMin,
             widthMax: params.lines.widthMax,
             seed: params.lines.seed,
             inkBlur: params.inkBlur
         });
-    }, [params.lines.strokeDensity, params.lines.randomness, params.lines.wobbleAmp,
+    }, [params.lines.strokeDensity, params.lines.randomness, params.lines.wobbleAmp, params.lines.waveAmp, params.lines.waveFreq, params.lines.roughness, params.lines.blendMode, params.lines.colorMode,
         params.lines.strokeLength, params.lines.widthMin, params.lines.widthMax,
         params.lines.seed, params.inkBlur]);
 

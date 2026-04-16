@@ -179,6 +179,83 @@ const Inspector = () => {
                         className="slider-input"
                     />
                 </div>
+                <div className="control-group">
+                    <label className="control-header">Roughness <span>{params.lines.roughness?.toFixed(1) || 0}</span></label>
+                    <input
+                        type="range" min="0" max="5" step="0.1"
+                        value={params.lines.roughness || 0}
+                        onChange={e => handleLinesChange('roughness', parseFloat(e.target.value))}
+                        className="slider-input"
+                    />
+                </div>
+                
+                <div style={{ marginTop: '0.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.5rem' }}></div>
+
+                <div className="control-group">
+                    <label className="control-header">Line Blend Mode</label>
+                    <select
+                        className="select-input"
+                        value={params.lines.blendMode || 'normal'}
+                        onChange={e => handleLinesChange('blendMode', e.target.value)}
+                    >
+                        <option value="normal">Normal</option>
+                        <option value="multiply">Multiply (Ink Accumulation)</option>
+                        <option value="screen">Screen (Light)</option>
+                    </select>
+                </div>
+                
+                <div className="control-group">
+                    <label className="control-header">Color Mode</label>
+                    <select
+                        className="select-input"
+                        value={params.lines.colorMode || 'Image'}
+                        onChange={e => handleLinesChange('colorMode', e.target.value)}
+                    >
+                        <option value="Image">Image Colors</option>
+                        <option value="Monochrome">Monochrome</option>
+                        <option value="Prism">Prism Neon (Data Art)</option>
+                    </select>
+                </div>
+
+                <div className="control-group">
+                    <label className="control-header">Min Width (px)<span>{params.lines.widthMin.toFixed(2)}</span></label>
+                    <input
+                        type="range" min="0.05" max="2.0" step="0.05"
+                        value={params.lines.widthMin}
+                        onChange={e => handleLinesChange('widthMin', parseFloat(e.target.value))}
+                        className="slider-input"
+                    />
+                </div>
+                <div className="control-group">
+                    <label className="control-header">Max Width (px)<span>{params.lines.widthMax.toFixed(2)}</span></label>
+                    <input
+                        type="range" min="0.1" max="6.0" step="0.1"
+                        value={params.lines.widthMax}
+                        onChange={e => handleLinesChange('widthMax', parseFloat(e.target.value))}
+                        className="slider-input"
+                    />
+                </div>
+
+                <div style={{ marginTop: '0.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.5rem' }}></div>
+                
+                <div className="control-group">
+                    <label className="control-header">Waveform Amp <span>{params.lines.waveAmp?.toFixed(1) || 0}</span></label>
+                    <input
+                        type="range" min="0" max="25" step="0.5"
+                        value={params.lines.waveAmp || 0}
+                        onChange={e => handleLinesChange('waveAmp', parseFloat(e.target.value))}
+                        className="slider-input"
+                    />
+                </div>
+                <div className="control-group">
+                    <label className="control-header">Waveform Freq <span>{params.lines.waveFreq?.toFixed(2) || 0.1}</span></label>
+                    <input
+                        type="range" min="0.05" max="3.0" step="0.05"
+                        value={params.lines.waveFreq || 0.1}
+                        onChange={e => handleLinesChange('waveFreq', parseFloat(e.target.value))}
+                        className="slider-input"
+                    />
+                </div>
             </AccordionSection>
 
             <AccordionSection title="5. Ink & Blur">
