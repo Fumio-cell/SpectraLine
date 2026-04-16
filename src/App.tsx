@@ -105,7 +105,29 @@ function App() {
 
     const file = e.dataTransfer.files?.[0];
     if (file && file.type.startsWith('image/')) {
-        useAppStore.getState().setInput(file);
+        if (file.size > 26214400) {
+            alert('File size exceeds 25MB limit.');
+            return;
+        }
+
+        const img = new Image();
+        img.onload = () => {
+            if (img.width > 8192 || img.height > 8192) {
+                alert('Image dimensions exceed 8192px max edge.');
+                return;
+            }
+
+            useAppStore.getState().setInput({
+                file: file,
+                filename: file.name,
+                mimeType: file.type as 'image/jpeg' | 'image/png',
+                width: img.width,
+                height: img.height,
+                byteSize: file.size,
+                previewUrl: URL.createObjectURL(file)
+            });
+        };
+        img.src = URL.createObjectURL(file);
     }
   };
 
