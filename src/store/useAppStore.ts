@@ -53,8 +53,8 @@ const presets: Preset[] = [
         params: {
             ...defaultParams,
             maps: { ...defaultParams.maps, gradientGain: 2.5 },
-            // アナログの滲みを消し、不要なハッチング網掛けを省いて「エッジ抽出（輪郭）のみ」をクリーンに描画する
-            lines: { ...defaultParams.lines, sourceMode: 'Edges', strokeDensity: 3.5, strokeLength: 40, wobbleAmp: 0.0, wobbleFreq: 0, roughness: 0.0, randomness: 1, widthMin: 0.1, widthMax: 0.5, pressureTaper: 0.3 },
+            // アナログの滲みを消し、不要なハッチング網掛けを省いて「エッジ抽出（輪郭）のみ」をクリーンかつ力強く描画する
+            lines: { ...defaultParams.lines, sourceMode: 'Edges', edgeThreshold: 0.04, strokeDensity: 6.0, strokeLength: 80, wobbleAmp: 0.0, wobbleFreq: 0, roughness: 0.1, randomness: 2, widthMin: 0.8, widthMax: 3.5, pressureTaper: 0.6 },
             inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 0, bleedBlurPx: 0, bleedOpacityPct: 0 }
         }
     },
