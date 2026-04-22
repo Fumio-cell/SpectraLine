@@ -125,11 +125,11 @@ export function buildStrokes(
     const passes = [
         // 形を抜き出すための決定的な「強いエッジ（輪郭）」パス (長くて力強い線)
         { type: 'edge_trace', angle: 0, minMag: 0.04, minDark: 0.0, maxStrokes: 0.25, length: 3.5, width: 1.2, alpha: 0.95 },
-        // シャドウ・ハッチング（影）パス (ベタ塗りの暗闇を避け、ディテールがある部分に限定するため minMag を設定)
-        { type: 'hatch', angle: Math.PI * 0.15, minMag: 0.015, minDark: 0.05, maxStrokes: 0.30, length: 1.8, width: 0.4, alpha: 0.5 },
-        { type: 'hatch', angle: Math.PI * 0.70, minMag: 0.02, minDark: 0.15, maxStrokes: 0.20, length: 1.2, width: 0.5, alpha: 0.6 },
-        { type: 'hatch', angle: Math.PI * 0.45, minMag: 0.025, minDark: 0.30, maxStrokes: 0.15, length: 0.8, width: 0.7, alpha: 0.8 },
-        { type: 'hatch', angle: Math.PI * 0.85, minMag: 0.03, minDark: 0.50, maxStrokes: 0.10, length: 0.6, width: 0.9, alpha: 1.0 }
+        // シャドウ・ハッチング（影）パス (ベタ塗りの暗闇を避けつつ、服のシワなどの微妙なノイズ情報は拾うように minMag を限界まで下げる)
+        { type: 'hatch', angle: Math.PI * 0.15, minMag: 0.005, minDark: 0.05, maxStrokes: 0.30, length: 1.8, width: 0.4, alpha: 0.5 },
+        { type: 'hatch', angle: Math.PI * 0.70, minMag: 0.008, minDark: 0.15, maxStrokes: 0.20, length: 1.2, width: 0.5, alpha: 0.6 },
+        { type: 'hatch', angle: Math.PI * 0.45, minMag: 0.012, minDark: 0.30, maxStrokes: 0.15, length: 0.8, width: 0.7, alpha: 0.8 },
+        { type: 'hatch', angle: Math.PI * 0.85, minMag: 0.015, minDark: 0.50, maxStrokes: 0.10, length: 0.6, width: 0.9, alpha: 1.0 }
     ];
 
     const cellSize = 2;
@@ -291,7 +291,8 @@ function traceArtistStroke(
             targetDir = direction[idx] + Math.PI / 2;
         } else {
             const gradDir = direction[idx] + Math.PI / 2;
-            const blend = Math.min(1.0, mag * 2.5);
+            // ハッチングは輪郭に巻き付きすぎず（最大でも40%の影響）、基本の角度を保って「斜線塗り」の質感を維持する
+            const blend = Math.min(0.4, mag * 1.2);
             targetDir = lerpAngle(hatchAngle, gradDir, blend);
         }
 
