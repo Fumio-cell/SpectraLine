@@ -39,9 +39,9 @@ export function buildStrokes(
     const rng = new PRNG(params.seed === 0 ? Math.floor(Math.random() * 10000) : params.seed);
 
     const densityVal = Math.max(0.1, params.strokeDensity);
-    const rawCount = Math.floor((width * height * densityVal) / 120);
-    // 上限を15,000本から150,000本へ大幅解放し、密度パラメータが正しく反映されるようにする
-    const maxStrokesTotal = Math.min(rawCount, 150000);
+    const rawCount = Math.floor((width * height * densityVal) / 40);
+    // 上限を150,000本から400,000本へ大幅解放し、高密度のハッチングが画面全体を埋め尽くせるようにする
+    const maxStrokesTotal = Math.min(rawCount, 400000);
 
     const darknessMap = new Float32Array(width * height);
     for (let i = 0; i < width * height; i++) {
@@ -190,7 +190,8 @@ export function buildStrokes(
 
             const gx = Math.floor(sx / cellSize);
             const gy = Math.floor(sy / cellSize);
-            if (visited[gy * gridW + gx] >= 4) continue;
+            // 同一ピクセル付近からの発生上限を大幅に緩和（密度に応じて限界突破可能にする）
+            if (visited[gy * gridW + gx] >= 8 + densityVal * 3) continue;
 
             const localDark = darknessMap[idx];
             const wScale = (0.1 + localDark * 0.9) * passConfig.width;
