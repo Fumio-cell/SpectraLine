@@ -64,8 +64,8 @@ const presets: Preset[] = [
         params: {
             ...defaultParams,
             maps: { ...defaultParams.maps, gradientGain: 2.8 },
-            // ハッチングの長さを大幅に短く（140->60）し、鉛筆の粗いストローク感を表現する
-            lines: { ...defaultParams.lines, sourceMode: 'Hybrid', strokeDensity: 4.0, strokeLength: 60, widthMin: 0.08, widthMax: 0.35, wobbleAmp: 0.02, wobbleFreq: 0.2, roughness: 2.5, randomness: 2, pressureTaper: 0.5 },
+            // ハッチングの特徴を活かしつつ、鉛筆の太さと密度を適切に引き上げ、エッジ閾値を下げてオブジェクトの形状（輪郭）を明確に担保する
+            lines: { ...defaultParams.lines, sourceMode: 'Hybrid', edgeThreshold: 0.04, strokeDensity: 8.0, strokeLength: 45, widthMin: 0.5, widthMax: 1.8, wobbleAmp: 0.05, wobbleFreq: 0.5, roughness: 2.0, randomness: 4, pressureTaper: 0.8 },
             inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 0.1, bleedBlurPx: 0.15, bleedOpacityPct: 3 }
         }
     },
