@@ -124,12 +124,12 @@ export function buildStrokes(
 
     const passes = [
         // 形を抜き出すための決定的な「強いエッジ（輪郭）」パス (長くて力強い線)
-        { type: 'edge_trace', angle: 0, minMag: 0.08, minDark: 0.0, maxStrokes: 0.25, length: 3.5, width: 1.2, alpha: 0.95 },
-        // シャドウ・ハッチング（影）パス (明るい部分から暗い部分まで網掛けを作り、塊感を出す)
-        { type: 'hatch', angle: Math.PI * 0.15, minMag: 0.0, minDark: 0.05, maxStrokes: 0.30, length: 1.8, width: 0.4, alpha: 0.5 },
-        { type: 'hatch', angle: Math.PI * 0.70, minMag: 0.0, minDark: 0.15, maxStrokes: 0.20, length: 1.2, width: 0.5, alpha: 0.6 },
-        { type: 'hatch', angle: Math.PI * 0.45, minMag: 0.0, minDark: 0.30, maxStrokes: 0.15, length: 0.8, width: 0.7, alpha: 0.8 },
-        { type: 'hatch', angle: Math.PI * 0.85, minMag: 0.0, minDark: 0.50, maxStrokes: 0.10, length: 0.6, width: 0.9, alpha: 1.0 }
+        { type: 'edge_trace', angle: 0, minMag: 0.04, minDark: 0.0, maxStrokes: 0.25, length: 3.5, width: 1.2, alpha: 0.95 },
+        // シャドウ・ハッチング（影）パス (ベタ塗りの暗闇を避け、ディテールがある部分に限定するため minMag を設定)
+        { type: 'hatch', angle: Math.PI * 0.15, minMag: 0.015, minDark: 0.05, maxStrokes: 0.30, length: 1.8, width: 0.4, alpha: 0.5 },
+        { type: 'hatch', angle: Math.PI * 0.70, minMag: 0.02, minDark: 0.15, maxStrokes: 0.20, length: 1.2, width: 0.5, alpha: 0.6 },
+        { type: 'hatch', angle: Math.PI * 0.45, minMag: 0.025, minDark: 0.30, maxStrokes: 0.15, length: 0.8, width: 0.7, alpha: 0.8 },
+        { type: 'hatch', angle: Math.PI * 0.85, minMag: 0.03, minDark: 0.50, maxStrokes: 0.10, length: 0.6, width: 0.9, alpha: 1.0 }
     ];
 
     const cellSize = 2;
@@ -170,8 +170,8 @@ export function buildStrokes(
                     }
                 }
             } else {
-                // ハッチング（陰影塗り）の場合は暗さを優先
-                if (dark >= passConfig.minDark) found = true;
+                // ハッチング（陰影塗り）の場合は暗さと同時に、ベタ塗りの無地(何も情報がない闇)を避けるためエッジ強度(minMag)も要求する
+                if (dark >= passConfig.minDark && mag >= passConfig.minMag) found = true;
                 else {
                     for (let j = 0; j < 40; j++) {
                         sx = Math.floor(rng.nextFloat() * width);
