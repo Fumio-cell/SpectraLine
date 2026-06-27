@@ -40,7 +40,7 @@ const LeftPanel = () => {
         <div className="left-panel">
 
             <div style={{ marginBottom: '2rem' }}>
-                <h3 style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '1rem' }}>File</h3>
+                <h3 style={{ fontFamily: "'Fraunces', serif", fontSize: '0.9rem', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: '1rem' }}>File</h3>
 
                 <input
                     type="file"
@@ -75,7 +75,7 @@ const LeftPanel = () => {
             </div>
 
             <div style={{ marginBottom: '2rem' }}>
-                <h3 style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '1rem' }}>Presets</h3>
+                <h3 style={{ fontFamily: "'Fraunces', serif", fontSize: '0.9rem', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: '1rem' }}>Presets</h3>
                 <div className="preset-list">
                     {/* Managed in TopBar now, but keeping layout as specified */}
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Use top bar to select preset</div>
@@ -83,7 +83,7 @@ const LeftPanel = () => {
             </div>
 
             <div>
-                <h3 style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: '1rem' }}>Outputs</h3>
+                <h3 style={{ fontFamily: "'Fraunces', serif", fontSize: '0.9rem', fontWeight: 500, color: 'var(--text-secondary)', marginBottom: '1rem' }}>Outputs</h3>
                 <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
                         <FileOutput size={14} /> lines.png
