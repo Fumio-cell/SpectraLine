@@ -45,7 +45,12 @@ export const Header: React.FC = () => {
         <header className="toolkit-header">
             <div className="header-left">
                 <div className="toolkit-brand">
-                    <svg className="brand-icon" viewBox="0 0 48 48" fill="none"><line x1="10" y1="38" x2="10" y2="28" stroke="#7c5cfc" strokeWidth="2" strokeLinecap="round" opacity="0.5"/><line x1="16" y1="38" x2="16" y2="22" stroke="#7c5cfc" strokeWidth="2" strokeLinecap="round" opacity="0.6"/><line x1="22" y1="38" x2="22" y2="14" stroke="#7c5cfc" strokeWidth="2" strokeLinecap="round" opacity="0.8"/><line x1="28" y1="38" x2="28" y2="18" stroke="#7c5cfc" strokeWidth="2" strokeLinecap="round" opacity="0.7"/><line x1="34" y1="38" x2="34" y2="24" stroke="#7c5cfc" strokeWidth="2" strokeLinecap="round" opacity="0.6"/><path d="M8 30 Q14 20 20 12 Q26 18 32 16 Q38 22 42 28" stroke="#5ce0fc" strokeWidth="1.5" fill="none" strokeLinecap="round"/></svg>
+                    <svg className="brand-icon" width="28" height="28" viewBox="0 0 48 48" fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 24 L20 16 L26 24 L20 32 Z"/>
+                        <circle cx="20" cy="24" r="1.6" fill="rgba(255,255,255,0.75)" stroke="none"/>
+                        <path d="M26 24 L34 24"/>
+                        <circle cx="36" cy="24" r="2.4"/>
+                    </svg>
                     <span className="toolkit-name">Poetic Signal Toolkit</span>
                 </div>
                 <div className="app-separator">/</div>
@@ -89,7 +94,7 @@ export const Header: React.FC = () => {
                     padding: 0.75rem 1.5rem;
                     background: rgba(15, 23, 42, 0.85);
                     backdrop-filter: blur(12px);
-                    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+                    border-bottom: 1px solid #9E3D3F;
                     position: sticky;
                     top: 0;
                     z-index: 1000;
@@ -112,10 +117,12 @@ export const Header: React.FC = () => {
                     height: 32px;
                 }
                 .toolkit-name {
-                    font-size: 20px;
-                    font-weight: 800;
-                    letter-spacing: -0.02em;
-                    color: #fff;
+                    font-family: 'Fraunces', serif;
+                    font-size: 18px;
+                    font-weight: 500;
+                    font-optical-sizing: auto;
+                    letter-spacing: 0.01em;
+                    color: rgba(255, 255, 255, 0.9);
                 }
                 .app-separator {
                     color: rgba(255, 255, 255, 0.2);
