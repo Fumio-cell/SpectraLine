@@ -2,6 +2,19 @@ import type { Params } from './types';
 import type { StrokePath } from './lines/tracer';
 import { renderStrokes } from './renderer';
 import type { InkBlurParams } from './types';
+import { DEMO_MODE, DEMO_MAX_EDGE } from '../config';
+
+export function drawDemoWatermark(ctx: CanvasRenderingContext2D, width: number, height: number) {
+    const fontSize = Math.max(12, Math.round(Math.min(width, height) * 0.022));
+    const margin = Math.round(fontSize * 0.8);
+    ctx.save();
+    ctx.font = `600 ${fontSize}px Inter, system-ui, sans-serif`;
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    ctx.fillStyle = 'rgba(128, 128, 128, 0.75)';
+    ctx.fillText('SpectraLine (demo)', width - margin, height - margin);
+    ctx.restore();
+}
 
 /**
  * Executes a full high-resolution render for export.
@@ -14,6 +27,10 @@ export async function exportLinesAsPNG(
     scale: number,
     maxEdge: number
 ): Promise<Blob> {
+    if (DEMO_MODE) {
+        scale = 1;
+        maxEdge = Math.min(maxEdge, DEMO_MAX_EDGE);
+    }
     return new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => {
@@ -152,6 +169,8 @@ export async function exportLinesAsPNG(
                                 ctx.drawImage(tempCanvas, 0, 0);
                                 ctx.filter = 'none';
                             }
+
+                            if (DEMO_MODE) drawDemoWatermark(ctx, outWidth, outHeight);
 
                             console.timeEnd('[Export] Render');
                             console.log(`[Export] Converting to PNG blob...`);

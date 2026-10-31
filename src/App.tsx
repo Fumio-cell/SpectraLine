@@ -6,14 +6,14 @@ import Inspector from './components/Inspector';
 import { Header } from './components/Header';
 import { AppEngine } from './core/engine';
 import { useAppStore } from './store/useAppStore';
-import { openLemonSqueezyCheckout, signInWithGoogle } from './lib/commercial';
+import { DEMO_MODE } from './config';
 
 type ViewTab = 'Original' | 'Maps' | 'Lines' | 'Compare';
 
 function App() {
   const [activeTab, setActiveTab] = useState<ViewTab>('Lines');
   const [engine, setEngine] = useState<AppEngine | null>(null);
-  const [userStatus, setUserStatus] = useState<{ user: any, isPro: boolean }>({ user: null, isPro: false });
+  const [demoLimited, setDemoLimited] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   
   const activePresetId = useAppStore(state => state.activePresetId);
@@ -24,27 +24,7 @@ function App() {
     setEngine(eng);
   }, []);
 
-  const handleAuthStatus = useCallback((e: any) => {
-    setUserStatus(e.detail);
-  }, []);
-
   useEffect(() => {
-    window.addEventListener('auth:status', handleAuthStatus as EventListener);
-    return () => window.removeEventListener('auth:status', handleAuthStatus as EventListener);
-  }, [handleAuthStatus]);
-
-  useEffect(() => {
-    const handleBuyPro = () => {
-      if (!userStatus.user) {
-        alert('Please login first to upgrade to PRO.');
-        signInWithGoogle();
-        return;
-      }
-      openLemonSqueezyCheckout(userStatus.user.id);
-    };
-
-
-
     const handleExport = async () => {
       if (!engine) return;
       const state = useAppStore.getState();
@@ -59,6 +39,7 @@ function App() {
       try {
         useAppStore.getState().setProcessing(true, 'Exporting high-res lines...');
         await engine.exportPNG(params);
+        if (DEMO_MODE) setDemoLimited(true);
       } catch (err: any) {
         alert(`Export failed: ${err.message}`);
       } finally {
@@ -71,6 +52,7 @@ function App() {
       try {
         useAppStore.getState().setProcessing(true, 'Exporting maps...');
         await engine.exportMapPNG();
+        if (DEMO_MODE) setDemoLimited(true);
       } catch (err: any) {
         alert(`Export map failed: ${err.message}`);
       } finally {
@@ -80,14 +62,12 @@ function App() {
 
     window.addEventListener('app:export', handleExport);
     window.addEventListener('app:exportMap', handleExportMap);
-    window.addEventListener('app:buyPro', handleBuyPro);
 
     return () => {
       window.removeEventListener('app:export', handleExport);
       window.removeEventListener('app:exportMap', handleExportMap);
-      window.removeEventListener('app:buyPro', handleBuyPro);
     };
-  }, [engine, userStatus]);
+  }, [engine]);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -198,7 +178,7 @@ function App() {
 
       {/* Right Panel - Inspector */}
       <div style={{ width: '320px', minWidth: '320px', borderLeft: '1px solid var(--panel-border)', backgroundColor: 'var(--panel-bg)', overflowY: 'auto' }}>
-        <Inspector />
+        <Inspector demoLimited={demoLimited} />
       </div>
     </div>
   </div>

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronRight, Info } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
+import { DEMO_MODE, DEMO_MAX_EDGE, BUY_URL } from '../config';
 
 interface AccordionSectionProps {
     title: string;
@@ -22,7 +23,7 @@ const AccordionSection: React.FC<AccordionSectionProps> = ({ title, defaultExpan
     );
 };
 
-const Inspector = () => {
+const Inspector = ({ demoLimited = false }: { demoLimited?: boolean }) => {
     const params = useAppStore(state => state.manifest.params);
     const updateParams = useAppStore(state => state.updateParams);
 
@@ -296,16 +297,18 @@ const Inspector = () => {
                     <label className="control-header">Export Scale</label>
                     <select
                         className="select-input"
-                        value={params.export.scale}
+                        value={DEMO_MODE ? 1 : params.export.scale}
                         onChange={e => handleExportChange('scale', parseInt(e.target.value))}
                     >
                         <option value="1">1x (Original Size)</option>
-                        <option value="2">2x</option>
-                        <option value="3">3x</option>
-                        <option value="4">4x</option>
+                        <option value="2" disabled={DEMO_MODE}>2x</option>
+                        <option value="3" disabled={DEMO_MODE}>3x</option>
+                        <option value="4" disabled={DEMO_MODE}>4x</option>
                     </select>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                        Will be capped at 8192px maximum edge.
+                        {DEMO_MODE
+                            ? `Demo: 1x only, capped at ${DEMO_MAX_EDGE}px maximum edge.`
+                            : 'Will be capped at 8192px maximum edge.'}
                     </div>
                 </div>
 
@@ -341,6 +344,12 @@ const Inspector = () => {
                 >
                     Export Map PNG
                 </button>
+                {DEMO_MODE && demoLimited && (
+                    <p className="demo-notice">
+                        Demo export is limited to {DEMO_MAX_EDGE} px with a watermark.{' '}
+                        <a href={BUY_URL} target="_blank" rel="noopener noreferrer">Get the full version</a>
+                    </p>
+                )}
             </AccordionSection>
 
         </div>

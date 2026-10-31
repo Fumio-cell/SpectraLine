@@ -1,7 +1,8 @@
 import type { Params } from './types';
 import type { StrokePath } from './lines/tracer';
 import { renderStrokes, compositeLayers } from './renderer';
-import { exportLinesAsPNG } from './export';
+import { exportLinesAsPNG, drawDemoWatermark } from './export';
+import { DEMO_MODE, DEMO_MAX_EDGE } from '../config';
 
 export class AppEngine {
     private worker: Worker | null = null;
@@ -179,8 +180,20 @@ export class AppEngine {
 
         console.log(`[Engine] Exporting map ${this.canvasMaps.width}x${this.canvasMaps.height}...`);
 
+        let source = this.canvasMaps;
+        if (DEMO_MODE) {
+            const fit = Math.min(1, DEMO_MAX_EDGE / Math.max(source.width, source.height));
+            const demoCanvas = document.createElement('canvas');
+            demoCanvas.width = Math.floor(source.width * fit);
+            demoCanvas.height = Math.floor(source.height * fit);
+            const demoCtx = demoCanvas.getContext('2d')!;
+            demoCtx.drawImage(source, 0, 0, demoCanvas.width, demoCanvas.height);
+            drawDemoWatermark(demoCtx, demoCanvas.width, demoCanvas.height);
+            source = demoCanvas;
+        }
+
         return new Promise((resolve, reject) => {
-            this.canvasMaps.toBlob((blob) => {
+            source.toBlob((blob) => {
                 if (!blob) {
                     reject(new Error('Map canvas to Blob failed.'));
                     return;
