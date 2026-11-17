@@ -1,5 +1,10 @@
 import { create } from 'zustand';
-import type { Params, ProjectManifest, Preset, ProjectInput } from '../core/types';
+import type { Params, ProjectManifest, Look, LookParams, ProjectInput } from '../core/types';
+
+/** Fixed default so a fresh session is reproducible. Random replaces it with a visible number. */
+export const DEFAULT_SEED = 1;
+
+const flow: LookParams = { mode: 'flow', spacing: 2.4, length: 1, calm: 0.12, levels: 46, minLength: 24, width: 1.5 };
 
 const defaultParams: Params = {
     preview: { previewMaxEdge: 1024 },
@@ -8,106 +13,20 @@ const defaultParams: Params = {
         colorSmoothing: 0.2,
         gradientGain: 1.5,
         gradientThreshold: 0.05,
-        contoursEnabled: false,
-        contourLevels: 12,
-        contourSmoothing: 0.4,
         scientificMode: false
     },
-    lines: {
-        sourceMode: 'Hybrid',
-        edgeThreshold: 0.08,
-        strokeDensity: 1.0,
-        strokeLength: 80,
-        widthMin: 0.5,
-        widthMax: 1.5,
-        pressureTaper: 0.6,
-        wobbleAmp: 0.4,
-        wobbleFreq: 2.0,
-        waveAmp: 0.0,
-        waveFreq: 0.2,
-        roughness: 0.0,
-        randomness: 10,
-        blendMode: 'normal',
-        colorMode: 'Image',
-        seed: 0
-    },
-    inkBlur: {
-        bleedAmountPx: 0,
-        bleedBlurPx: 0,
-        bleedOpacityPct: 0,
-        bleedMode: 'Normal',
-        finalBlurPx: 0
-    },
-    export: {
-        scale: 1,
-        maxEdge: 8192,
-        targets: ['lines']
-    }
+    lines: { ...flow, background: 'black', seed: DEFAULT_SEED },
+    export: { edge: 2048 }
 };
 
-const presets: Preset[] = [
-    { presetId: 'default', name: 'Default', params: defaultParams },
-    {
-        presetId: 'clean-ink',
-        name: 'Clean Ink',
-        params: {
-            ...defaultParams,
-            maps: { ...defaultParams.maps, gradientGain: 2.5 },
-            // アナログの滲みを消し、不要なハッチング網掛けを省いて「エッジ抽出（輪郭）のみ」をクリーンかつ力強く描画する
-            lines: { ...defaultParams.lines, sourceMode: 'Edges', edgeThreshold: 0.04, strokeDensity: 6.0, strokeLength: 80, wobbleAmp: 0.0, wobbleFreq: 0, roughness: 0.1, randomness: 2, widthMin: 0.8, widthMax: 3.5, pressureTaper: 0.6 },
-            inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 0, bleedBlurPx: 0, bleedOpacityPct: 0 }
-        }
-    },
-    {
-        presetId: 'pencil-sketch',
-        name: 'Pencil Sketch',
-        params: {
-            ...defaultParams,
-            maps: { ...defaultParams.maps, gradientGain: 2.8 },
-            // ハッチングの特徴を活かしつつ、鉛筆の太さと密度を適切に引き上げ、エッジ閾値を下げてオブジェクトの形状（輪郭）を明確に担保する
-            lines: { ...defaultParams.lines, sourceMode: 'Hybrid', edgeThreshold: 0.04, strokeDensity: 8.0, strokeLength: 45, widthMin: 0.5, widthMax: 1.8, wobbleAmp: 0.05, wobbleFreq: 0.5, roughness: 2.0, randomness: 4, pressureTaper: 0.8 },
-            inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 0.1, bleedBlurPx: 0.15, bleedOpacityPct: 3 }
-        }
-    },
-    {
-        presetId: 'topo-map',
-        name: 'Topo Map',
-        params: {
-            ...defaultParams,
-            maps: { ...defaultParams.maps, contoursEnabled: true, contourLevels: 24 },
-            // 等高線を主体にするため、ランダムストロークの密度を下げて邪魔にならないようにする
-            lines: { ...defaultParams.lines, sourceMode: 'Hybrid', strokeDensity: 0.2, wobbleAmp: 0.4, roughness: 0.5, randomness: 8 },
-            inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 1, bleedBlurPx: 1, bleedOpacityPct: 10 }
-        }
-    },
-    {
-        presetId: 'glitchy',
-        name: 'Glitchy Analog',
-        params: {
-            ...defaultParams,
-            lines: { ...defaultParams.lines, wobbleAmp: 2.2, wobbleFreq: 7, roughness: 4.0, randomness: 55, strokeDensity: 1.0, blendMode: 'screen' },
-            inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 2, bleedBlurPx: 2.5, bleedOpacityPct: 20 }
-        }
-    },
-    {
-        presetId: 'wet-ink',
-        name: 'Wet Ink',
-        params: {
-            ...defaultParams,
-            lines: { ...defaultParams.lines, widthMax: 5.5, pressureTaper: 0.7, strokeDensity: 0.8, strokeLength: 80, roughness: 0.8, blendMode: 'multiply' },
-            inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 4, bleedBlurPx: 4, bleedOpacityPct: 35, bleedMode: 'Multiply' }
-        }
-    },
-    {
-        presetId: 'hologram',
-        name: 'Hologram Spectra',
-        params: {
-            ...defaultParams,
-            lines: { ...defaultParams.lines, sourceMode: 'Hybrid', strokeDensity: 3.0, waveAmp: 8.0, waveFreq: 0.8, colorMode: 'Prism', blendMode: 'screen', widthMin: 0.3, widthMax: 1.0, roughness: 0 },
-            inkBlur: { ...defaultParams.inkBlur, bleedAmountPx: 2, bleedBlurPx: 6, bleedOpacityPct: 60, bleedMode: 'Normal', finalBlurPx: 1.5 }
-        }
-    }
+const presets: Look[] = [
+    { presetId: 'flow', name: 'FLOW', lines: flow },
+    { presetId: 'flow-fine', name: 'FLOW FINE', lines: { ...flow, spacing: 2.4, length: 0.8, width: 0.9 } },
+    { presetId: 'flow-bold', name: 'FLOW BOLD', lines: { ...flow, spacing: 2.6, length: 2.2, width: 2.8 } },
+    { presetId: 'isolines', name: 'ISOLINES', lines: { ...flow, mode: 'isolines', width: 1.2 } }
 ];
+
+const LOOK_FIELDS: Array<keyof LookParams> = ['mode', 'spacing', 'length', 'calm', 'levels', 'minLength', 'width'];
 
 interface AppState {
     manifest: ProjectManifest;
@@ -117,7 +36,7 @@ interface AppState {
     processingStage: string;
     setManifest: (update: Partial<ProjectManifest>) => void;
     setInput: (input: Partial<ProjectInput>) => void;
-    updateParams: (section: keyof Params, update: any) => void;
+    updateParams: (section: keyof Params, update: Record<string, unknown>) => void;
     applyPreset: (presetId: string) => void;
     resetProject: () => void;
     setProcessing: (isProcessing: boolean, stage?: string) => void;
@@ -134,8 +53,8 @@ export const useAppStore = create<AppState>((set) => ({
         params: structuredClone(defaultParams),
         presets: presets
     },
-    activePresetId: 'default',
-    previewQuality: 'Live',
+    activePresetId: 'flow',
+    previewQuality: 'High',
     isProcessing: false,
     processingStage: '',
 
@@ -156,29 +75,34 @@ export const useAppStore = create<AppState>((set) => ({
             ...state.manifest,
             params: {
                 ...state.manifest.params,
-                [section]: { ...(state.manifest.params as any)[section], ...update }
+                [section]: { ...(state.manifest.params[section] as object), ...update }
             },
             updatedAt: new Date().toISOString()
         },
-        activePresetId: 'custom' // mark as custom when manually changed
+        // Only a change to the look itself makes it "custom"; seed, background, export do not.
+        activePresetId: section === 'lines' && LOOK_FIELDS.some(k => k in update) ? 'custom' : state.activePresetId
     })),
 
     applyPreset: (presetId) => set((state) => {
         const preset = presets.find(p => p.presetId === presetId);
         if (!preset) return state;
 
+        // A look replaces the drawing settings only; seed, background and export are the user's.
         return {
             activePresetId: presetId,
             manifest: {
                 ...state.manifest,
-                params: structuredClone(preset.params),
+                params: {
+                    ...state.manifest.params,
+                    lines: { ...state.manifest.params.lines, ...preset.lines }
+                },
                 updatedAt: new Date().toISOString()
             }
         };
     }),
 
     resetProject: () => set(() => ({
-        activePresetId: 'default',
+        activePresetId: 'flow',
         isProcessing: false,
         processingStage: '',
         manifest: {

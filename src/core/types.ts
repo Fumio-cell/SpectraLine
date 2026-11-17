@@ -3,38 +3,37 @@ export interface MapParams {
     colorSmoothing: number;
     gradientGain: number;
     gradientThreshold: number;
-    contoursEnabled: boolean;
-    contourLevels: number;
-    contourSmoothing: number;
     scientificMode: boolean;
 }
 
-export interface LineParams {
-    sourceMode: 'Edges' | 'Contours' | 'Hybrid';
-    edgeThreshold: number;
-    strokeDensity: number;
-    strokeLength: number;
-    widthMin: number;
-    widthMax: number;
-    pressureTaper: number;
-    wobbleAmp: number;
-    wobbleFreq: number;
-    waveAmp: number;
-    waveFreq: number;
-    roughness: number;
-    randomness: number;
-    blendMode: 'normal' | 'multiply' | 'screen';
-    colorMode: 'Image' | 'Monochrome' | 'Prism';
+/** FLOW follows the edge-tangent field; ISOLINES traces contours of luminance. */
+export type LineMode = 'flow' | 'isolines';
+export type Background = 'black' | 'transparent';
+
+/** The part of the line settings that a "look" defines. */
+export interface LookParams {
+    mode: LineMode;
+    /** FLOW: distance between neighbouring lines, in line widths. */
+    spacing: number;
+    /** FLOW: length multiplier. */
+    length: number;
+    /** FLOW: share of ink kept in flat areas (0 = none, 1 = as dense as everywhere). */
+    calm: number;
+    /** ISOLINES: number of luminance levels. */
+    levels: number;
+    /** ISOLINES: shortest contour kept, in px at a 1024 px long edge. */
+    minLength: number;
+    /** Line width in px at a 1024 px long edge. */
+    width: number;
+}
+
+export interface LineParams extends LookParams {
+    background: Background;
+    /** Same image + settings + seed always give the same pixels. */
     seed: number;
 }
 
-export interface InkBlurParams {
-    bleedAmountPx: number;
-    bleedBlurPx: number;
-    bleedOpacityPct: number;
-    bleedMode: 'Normal' | 'Multiply';
-    finalBlurPx: number;
-}
+export type ExportEdge = 1024 | 2048 | 4096;
 
 export interface Params {
     preview: {
@@ -42,18 +41,15 @@ export interface Params {
     };
     maps: MapParams;
     lines: LineParams;
-    inkBlur: InkBlurParams;
     export: {
-        scale: 1 | 2 | 3 | 4;
-        maxEdge: 8192;
-        targets: Array<'lines' | 'mapGradient' | 'mapColor' | 'mapContours'>;
+        edge: ExportEdge;
     };
 }
 
-export interface Preset {
+export interface Look {
     presetId: string;
     name: string;
-    params: Params;
+    lines: LookParams;
 }
 
 export interface ProjectInput {
@@ -74,7 +70,7 @@ export interface ProjectManifest {
     updatedAt: string;
     input: ProjectInput;
     params: Params;
-    presets: Preset[];
+    presets: Look[];
     outputs?: {
         linesPngKey?: string;
         maps?: {

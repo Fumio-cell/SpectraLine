@@ -33,36 +33,11 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
     const prevLinesParamsRef = useRef<string>('');
     const prevFileRef = useRef<File | null>(null);
 
-    // Memoize maps params key to detect real changes
-    const mapsParamsKey = useMemo(() => {
-        return JSON.stringify({
-            maps: params.maps,
-            sourceMode: params.lines.sourceMode,
-            edgeThreshold: params.lines.edgeThreshold,
-            quality: previewQuality
-        });
-    }, [params.maps, params.lines.sourceMode, params.lines.edgeThreshold, previewQuality]);
+    // Maps only depend on the map settings.
+    const mapsParamsKey = useMemo(() => JSON.stringify(params.maps), [params.maps]);
 
-    // Memoize lines params key
-    const linesParamsKey = useMemo(() => {
-        return JSON.stringify({
-            strokeDensity: params.lines.strokeDensity,
-            randomness: params.lines.randomness,
-            wobbleAmp: params.lines.wobbleAmp,
-            waveAmp: params.lines.waveAmp,
-            waveFreq: params.lines.waveFreq,
-            roughness: params.lines.roughness,
-            blendMode: params.lines.blendMode,
-            colorMode: params.lines.colorMode,
-            strokeLength: params.lines.strokeLength,
-            widthMin: params.lines.widthMin,
-            widthMax: params.lines.widthMax,
-            seed: params.lines.seed,
-            inkBlur: params.inkBlur
-        });
-    }, [params.lines.strokeDensity, params.lines.randomness, params.lines.wobbleAmp, params.lines.waveAmp, params.lines.waveFreq, params.lines.roughness, params.lines.blendMode, params.lines.colorMode,
-        params.lines.strokeLength, params.lines.widthMin, params.lines.widthMax,
-        params.lines.seed, params.inkBlur]);
+    // Lines depend on every drawing setting and on the preview size.
+    const linesParamsKey = useMemo(() => JSON.stringify({ lines: params.lines, quality: previewQuality }), [params.lines, previewQuality]);
 
     // Initialize engine once
     useEffect(() => {
@@ -72,67 +47,43 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
         }
     }, [onEngineReady]);
 
-    // Unified Effect: Handles all processing triggers in a coordinated way
+    // One debounced entry point for everything that needs (re)drawing.
     useEffect(() => {
         if (!engineRef.current || !input.file) return;
 
         const fileChanged = input.file !== prevFileRef.current;
         const mapsChanged = mapsParamsKey !== prevMapsParamsRef.current;
         const linesChanged = linesParamsKey !== prevLinesParamsRef.current;
-
-        // Skip if nothing substantial changed
         if (!fileChanged && !mapsChanged && !linesChanged) return;
 
-        // Update refs
-        prevFileRef.current = input.file;
-        prevMapsParamsRef.current = mapsParamsKey;
-        prevLinesParamsRef.current = linesParamsKey;
-
-        let isCancelled = false;
-        
-        // Use a single debounced entry point
         const timeout = setTimeout(() => {
-            if (isCancelled || !engineRef.current) return;
+            const engine = engineRef.current;
+            if (!engine || !input.file) return;
+
+            // Remember what has really been sent, so a cancelled timer does not lose a change.
+            prevFileRef.current = input.file;
+            prevMapsParamsRef.current = mapsParamsKey;
+            prevLinesParamsRef.current = linesParamsKey;
 
             const activeParams = {
                 ...params,
-                preview: { ...params.preview, previewMaxEdge: previewQuality === 'Live' ? 512 : params.preview.previewMaxEdge },
-                lines: { ...params.lines, strokeDensity: previewQuality === 'Live' ? Math.min(params.lines.strokeDensity, 1.0) : params.lines.strokeDensity }
+                preview: { ...params.preview, previewMaxEdge: previewQuality === 'Live' ? 512 : 1024 }
             };
 
-            if (fileChanged || mapsChanged) {
-                // Full rebuild (Maps + Strokes)
-                setProcessing(true, 'Building maps...');
-                
-                engineRef.current.onMapsReady = () => {
-                    if (isCancelled) return;
-                    setProcessing(true, 'Tracing strokes...');
-                    engineRef.current?.buildStrokes(activeParams);
-                };
+            if (fileChanged) engine.setImage(input.file);
 
-                engineRef.current.onRenderComplete = () => {
-                    if (isCancelled) return;
-                    setProcessing(false);
-                };
-
-                engineRef.current.processImage(input.file!, activeParams);
-            } else if (linesChanged) {
-                // Incremental rebuild (Strokes only)
-                setProcessing(true, 'Retracing strokes...');
-
-                engineRef.current.onRenderComplete = () => {
-                    if (isCancelled) return;
-                    setProcessing(false);
-                };
-
-                engineRef.current.buildStrokes(activeParams);
+            if (fileChanged || linesChanged) {
+                setProcessing(true, 'Drawing lines...');
+                // The engine drops superseded results, so a completion is always for the latest request.
+                engine.onRenderComplete = () => setProcessing(false);
+                engine.onError = () => setProcessing(false);
+                engine.renderLines(activeParams);
             }
-        }, fileChanged ? 100 : 450); // Slightly more aggressive debounce for params
+            // Queued behind the lines, so the picture appears first.
+            if (fileChanged || mapsChanged) engine.buildMaps(activeParams);
+        }, fileChanged ? 100 : 450);
 
-        return () => {
-            isCancelled = true;
-            clearTimeout(timeout);
-        };
+        return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [input.file, mapsParamsKey, linesParamsKey]);
 
@@ -174,11 +125,11 @@ const Viewer: React.FC<ViewerProps> = ({ activeTab, onTabChange, onEngineReady }
 
                 <select 
                     value={previewQuality} 
-                    onChange={(e) => setPreviewQuality(e.target.value as any)}
+                    onChange={(e) => setPreviewQuality(e.target.value as 'Live' | 'High')}
                     style={{ padding: '2px 8px', borderRadius: '4px', background: 'rgba(255,255,255,0.1)', color: 'var(--text-main)', border: '1px solid var(--panel-border)', fontSize: '0.75rem', outline: 'none' }}
                 >
-                    <option value="Live">Live Proxies (Fast)</option>
-                    <option value="High">Full Quality</option>
+                    <option value="Live">Preview 512 px (Fast)</option>
+                    <option value="High">Preview 1024 px</option>
                 </select>
 
                 {/* Processing indicator */}

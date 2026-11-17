@@ -1,25 +1,64 @@
-import type { WorkerRequest, WorkerResponse } from './messageTypes';
+import type { WorkerRequest, WorkerResponse, WatermarkMask } from './messageTypes';
+import type { Params } from '../types';
 import { computeGradients } from '../maps/gradient';
-import { buildStrokes } from '../lines/tracer';
 import { quantizeColors } from '../maps/quantize';
-import { generateContours } from '../maps/contours';
+import { analyse, buildStrokes, drawLines, geometryKey, type Field, type StrokeSet } from '../lines/render';
+import { encodePNG } from '../lines/png';
 
-// Store mapped state in worker memory
-let currentMaps: any = null;
+// Working state, kept in worker memory.
+let source: { w: number; h: number; rgba: Uint8ClampedArray } | null = null;
+let field: Field | null = null;
+let strokeCache: { key: string; set: StrokeSet } | null = null;
+
+function getStrokes(lines: Params['lines']): { set: StrokeSet; field: Field; traceMs: number } {
+    if (!source) throw new Error('No image loaded');
+    const t0 = performance.now();
+    if (!field) field = analyse(source.rgba, source.w, source.h);
+    const key = geometryKey(lines);
+    if (!strokeCache || strokeCache.key !== key) {
+        strokeCache = { key, set: buildStrokes(field, lines) };
+    }
+    return { set: strokeCache.set, field, traceMs: Math.round(performance.now() - t0) };
+}
+
+function applyWatermark(rgba: Uint8ClampedArray, width: number, mark: WatermarkMask) {
+    // Mid-grey at 75 % opacity, composited with straight alpha.
+    for (let y = 0; y < mark.h; y++) {
+        for (let x = 0; x < mark.w; x++) {
+            const m = mark.alpha[y * mark.w + x];
+            if (!m) continue;
+            const a = (m / 255) * 0.75;
+            const k = ((mark.y + y) * width + (mark.x + x)) * 4;
+            const da = rgba[k + 3] / 255;
+            const oa = a + da * (1 - a);
+            for (let c = 0; c < 3; c++) {
+                rgba[k + c] = (128 * a + rgba[k + c] * da * (1 - a)) / oa;
+            }
+            rgba[k + 3] = oa * 255;
+        }
+    }
+}
+
+const post = (msg: WorkerResponse, transfer: Transferable[] = []) =>
+    (self as unknown as Worker).postMessage(msg, transfer);
 
 self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
     const req = e.data;
 
     try {
-        if (req.type === 'BUILD_MAPS') {
-            const { imageBuffer, width, height } = req.input;
+        if (req.type === 'SET_SOURCE') {
+            source = { w: req.width, h: req.height, rgba: new Uint8ClampedArray(req.buffer) };
+            field = null;
+            strokeCache = null;
+        }
+
+        else if (req.type === 'BUILD_MAPS') {
+            if (!source) throw new Error('No image loaded');
+            const { w: width, h: height } = source;
             const params = req.params;
 
-            // Report start
-            self.postMessage({ type: 'PROGRESS', requestId: req.requestId, status: 'ok', progress: 0.1 } as WorkerResponse);
-
-            // Reconstruct buffer
-            let imageData = new Uint8ClampedArray(imageBuffer);
+            // The quantiser works in place, so give it its own copy.
+            const imageData = new Uint8ClampedArray(source.rgba);
 
             // 0. Color Quantization (減色処理によるノイズ削減とシンプルな面構成化)
             // K数が有効な範囲（2〜128等）であれば適用
@@ -40,10 +79,9 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
             // 1. Gradients and direction
             // ※ Gain のスケーリングが強すぎて白飛びするのを防ぐため、内部で 0.3 倍程度に抑える
             const scaledGain = params.maps.gradientGain * 0.3;
-            const { magnitude, direction, luminance } = computeGradients(
+            const { magnitude, direction } = computeGradients(
                 imageData, width, height, scaledGain, params.maps.gradientThreshold, params.maps.scientificMode
             );
-            self.postMessage({ type: 'PROGRESS', requestId: req.requestId, status: 'ok', progress: 0.7 } as WorkerResponse);
 
             // 2. Build gradient map visualization (RGBA buffer for Maps tab)
             const gradMapBuffer = new Uint8ClampedArray(width * height * 4);
@@ -97,14 +135,8 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
                 gradMapBuffer[i * 4 + 3] = 255;
             }
 
-            currentMaps = {
-                width, height,
-                magnitude, direction, luminance,
-                imageData // Keep source image data for stroke coloring
-            };
-
             // Send gradient map data back for Maps tab visualization
-            (self as unknown as Worker).postMessage({
+            post({
                 type: 'MAPS_READY',
                 requestId: req.requestId,
                 status: 'ok',
@@ -112,83 +144,38 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
             } as WorkerResponse, [gradMapBuffer.buffer]);
         }
 
-        else if (req.type === 'BUILD_STROKES') {
-            if (!currentMaps) {
-                throw new Error('Maps must be built before strokes');
-            }
-
-            const strokes = buildStrokes(
-                currentMaps.width,
-                currentMaps.height,
-                currentMaps.magnitude,
-                currentMaps.direction,
-                currentMaps.luminance,
-                req.params.lines,
-                currentMaps.imageData
-            );
-
-            // ---- Contours (等高線) の結合 ----
-            if (req.params.maps && req.params.maps.contoursEnabled) {
-                const levels = req.params.maps.contourLevels || 12;
-                const polylines = generateContours(
-                    currentMaps.luminance,
-                    currentMaps.width,
-                    currentMaps.height,
-                    levels,
-                    req.params.maps.contourSmoothing || 0
-                );
-
-                // 膨大な数の等高線セグメント（数十万個）によるスプレッド構文(unshift(...))の
-                // Call stack size exceeded エラーとブラウザのフリーズを防ぐため、
-                // 最大描画数を制限し、安全に配列に結合します。
-                const MAX_CONTOURS = 20000; 
-                const step = Math.max(1, Math.floor(polylines.length / MAX_CONTOURS));
-                const contourStrokes = [];
-
-                for (let i = 0; i < polylines.length; i += step) {
-                    const pl = polylines[i];
-                    const raw = [];
-                    for (let j = 0; j < pl.points.length; j++) {
-                        raw.push(pl.points[j].x, pl.points[j].y, 1.0, 0.9);
-                    }
-                    contourStrokes.push({
-                        id: `contour_${Date.now()}_${i}`,
-                        points: new Float32Array(raw),
-                        style: {
-                            widthMin: req.params.lines.widthMin || 0.5,
-                            widthMax: req.params.lines.widthMin || 1.0, 
-                            taper: 0,
-                            alpha: 0.85,
-                            color: { r: 25, g: 25, b: 35 }
-                        },
-                        meta: { source: 'contour', seedUsed: 0 }
-                    });
-                }
-                
-                // スプレッド構文ではなく安全なループで追加、または splice
-                // contourStrokes が最大 20,000 に抑えられているので、unshift.apply でも安全ですが
-                // 確実に安全な Array.prototype.unshift.apply を使用せずループで追加します
-                for (let i = contourStrokes.length - 1; i >= 0; i--) {
-                    strokes.unshift(contourStrokes[i] as any);
-                }
-            }
-
-            // Collect all Float32Array buffers for zero-copy transfer
-            const pointBuffers = strokes.map(s => s.points.buffer);
-
-            self.postMessage({
-                type: 'STROKES_READY',
-                requestId: req.requestId,
-                status: 'ok',
-                strokes: strokes
-            } as WorkerResponse, pointBuffers as any);
+        else if (req.type === 'RENDER_LINES') {
+            const { set, field: f, traceMs } = getStrokes(req.lines);
+            const t0 = performance.now();
+            const rgba = drawLines(f, set, req.lines, req.outW, req.outH);
+            const drawMs = Math.round(performance.now() - t0);
+            post({
+                type: 'LINES_READY', requestId: req.requestId, status: 'ok',
+                width: req.outW, height: req.outH, buffer: rgba.buffer, strokeCount: set.count,
+                ms: { trace: traceMs, draw: drawMs }
+            } as WorkerResponse, [rgba.buffer]);
         }
-    } catch (err: any) {
-        self.postMessage({
+
+        else if (req.type === 'EXPORT_PNG') {
+            const { set, field: f, traceMs } = getStrokes(req.lines);
+            const t0 = performance.now();
+            const rgba = drawLines(f, set, req.lines, req.outW, req.outH);
+            if (req.watermark) applyWatermark(rgba, req.outW, req.watermark);
+            const t1 = performance.now();
+            const png = await encodePNG(rgba, req.outW, req.outH);
+            const t2 = performance.now();
+            post({
+                type: 'PNG_READY', requestId: req.requestId, status: 'ok',
+                buffer: png.buffer, width: req.outW, height: req.outH,
+                ms: { trace: traceMs, draw: Math.round(t1 - t0), encode: Math.round(t2 - t1) }
+            } as WorkerResponse, [png.buffer as ArrayBuffer]);
+        }
+    } catch (err: unknown) {
+        post({
             type: 'ERROR',
             requestId: req.requestId,
             status: 'error',
-            error: { code: 'PROCESSING_FAILED', message: err.message }
+            error: { code: 'PROCESSING_FAILED', message: err instanceof Error ? err.message : String(err) }
         } as WorkerResponse);
     }
 };

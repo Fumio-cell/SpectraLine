@@ -1,13 +1,22 @@
-import type { Params } from '../types';
-import type { StrokePath } from '../lines/tracer';
+import type { LineParams, Params } from '../types';
+
+export interface WatermarkMask {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    /** Coverage 0..255, w*h. */
+    alpha: Uint8ClampedArray;
+}
 
 export type WorkerRequest =
-    | { type: 'BUILD_MAPS'; requestId: string; input: { imageBuffer: ArrayBuffer; width: number; height: number; previewWidth: number; previewHeight: number }; params: Params }
-    | { type: 'BUILD_STROKES'; requestId: string; params: Params }
-    | { type: 'CANCEL'; requestId: string };
+    | { type: 'SET_SOURCE'; requestId: string; buffer: ArrayBuffer; width: number; height: number }
+    | { type: 'BUILD_MAPS'; requestId: string; params: Params }
+    | { type: 'RENDER_LINES'; requestId: string; lines: LineParams; outW: number; outH: number }
+    | { type: 'EXPORT_PNG'; requestId: string; lines: LineParams; outW: number; outH: number; watermark?: WatermarkMask };
 
 export type WorkerResponse =
-    | { type: 'MAPS_READY'; requestId: string; status: 'ok'; maps: any }
-    | { type: 'STROKES_READY'; requestId: string; status: 'ok'; strokes: StrokePath[] }
-    | { type: 'PROGRESS'; requestId: string; status: 'ok'; progress: number }
+    | { type: 'MAPS_READY'; requestId: string; status: 'ok'; maps: { width: number; height: number; gradientMapBuffer: ArrayBuffer } }
+    | { type: 'LINES_READY'; requestId: string; status: 'ok'; width: number; height: number; buffer: ArrayBuffer; strokeCount: number; ms: { trace: number; draw: number } }
+    | { type: 'PNG_READY'; requestId: string; status: 'ok'; buffer: ArrayBuffer; width: number; height: number; ms: { trace: number; draw: number; encode: number } }
     | { type: 'ERROR'; requestId: string; status: 'error'; error: { code: string; message: string } };

@@ -37,11 +37,11 @@ function App() {
       }
 
       try {
-        useAppStore.getState().setProcessing(true, 'Exporting high-res lines...');
+        useAppStore.getState().setProcessing(true, 'Exporting lines...');
         await engine.exportPNG(params);
         if (DEMO_MODE) setDemoLimited(true);
-      } catch (err: any) {
-        alert(`Export failed: ${err.message}`);
+      } catch (err: unknown) {
+        alert(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
         useAppStore.getState().setProcessing(false);
       }
@@ -53,8 +53,8 @@ function App() {
         useAppStore.getState().setProcessing(true, 'Exporting maps...');
         await engine.exportMapPNG();
         if (DEMO_MODE) setDemoLimited(true);
-      } catch (err: any) {
-        alert(`Export map failed: ${err.message}`);
+      } catch (err: unknown) {
+        alert(`Export map failed: ${err instanceof Error ? err.message : String(err)}`);
       } finally {
         useAppStore.getState().setProcessing(false);
       }
@@ -146,7 +146,7 @@ function App() {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* Top Bar with Presets */}
         <div style={{ height: '48px', display: 'flex', alignItems: 'center', gap: '8px', padding: '0 16px', borderBottom: '1px solid var(--panel-border)', backgroundColor: 'var(--panel-bg)', flexShrink: 0 }}>
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginRight: '8px' }}>Preset:</span>
+          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginRight: '8px' }}>Look:</span>
           {presets.map(p => (
             <button
               key={p.presetId}

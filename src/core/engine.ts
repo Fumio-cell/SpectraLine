@@ -1,184 +1,167 @@
 import type { Params } from './types';
-import type { StrokePath } from './lines/tracer';
-import { renderStrokes, compositeLayers } from './renderer';
-import { exportLinesAsPNG, drawDemoWatermark } from './export';
+import type { WorkerRequest, WorkerResponse } from './worker/messageTypes';
+import { sizeForEdge, WORK_EDGE } from './lines/render';
+import { demoWatermarkMask, downloadBlob } from './export';
 import { DEMO_MODE, DEMO_MAX_EDGE } from '../config';
 
+export interface ExportResult {
+    width: number;
+    height: number;
+    bytes: number;
+}
+
+interface PendingExport {
+    resolve: (r: ExportResult) => void;
+    reject: (e: Error) => void;
+}
+
 export class AppEngine {
-    private worker: Worker | null = null;
-    private canvasLines: HTMLCanvasElement;
-    private canvasBleed: HTMLCanvasElement;
-    private canvasOut: HTMLCanvasElement;
+    private worker: Worker;
     private canvasMaps: HTMLCanvasElement;
-    private currentParams?: Params;
-    private renderAbort: number = 0;
-    private currentWorkerRequestId: string = '';
-    private lastStrokes: StrokePath[] = [];
-    private currentFile?: File;
+    private canvasOut: HTMLCanvasElement;
+    private sourcePromise: Promise<void> = Promise.resolve();
+    private origW = 0;
+    private origH = 0;
+    private seq = 0;
+    private linesRequestId = '';
+    private mapsRequestId = '';
+    private pendingExports = new Map<string, PendingExport>();
 
     public onMapsReady?: () => void;
     public onRenderComplete?: () => void;
     public onError?: (err: string) => void;
 
     constructor(outCanvasId: string, mapsCanvasId?: string) {
-        this.canvasLines = document.createElement('canvas');
-        this.canvasBleed = document.createElement('canvas');
         this.canvasOut = document.getElementById(outCanvasId) as HTMLCanvasElement || document.createElement('canvas');
         this.canvasMaps = (mapsCanvasId ? document.getElementById(mapsCanvasId) as HTMLCanvasElement : null) || document.createElement('canvas');
-        this.initWorker();
-    }
-
-    private initWorker() {
         this.worker = new Worker(new URL('./worker/processor.ts', import.meta.url), { type: 'module' });
-        this.worker.onmessage = (e) => {
-            const res = e.data;
-            if (res.requestId !== this.currentWorkerRequestId) {
-                console.log(`[Engine] Ignored obsolete worker message: ${res.type} (${res.requestId})`);
-                return;
-            }
-
-            if (res.type === 'MAPS_READY') {
-                const { width, height, gradientMapBuffer } = res.maps;
-                if (gradientMapBuffer) {
-                    this.canvasMaps.width = width;
-                    this.canvasMaps.height = height;
-                    const ctx = this.canvasMaps.getContext('2d')!;
-                    const imgData = new ImageData(new Uint8ClampedArray(gradientMapBuffer), width, height);
-                    ctx.putImageData(imgData, 0, 0);
-                }
-                console.log('[Engine] Maps ready');
-                if (this.onMapsReady) this.onMapsReady();
-            } else if (res.type === 'STROKES_READY') {
-                const strokes: StrokePath[] = res.strokes;
-                this.lastStrokes = strokes;
-                console.log(`[Engine] Received ${strokes.length} strokes, avg ${Math.round(strokes.reduce((s, st) => s + st.points.length, 0) / (strokes.length * 4))} pts each`);
-                if (this.currentParams) {
-                    this.renderBatched(strokes, this.currentParams);
-                }
-            } else if (res.type === 'ERROR') {
-                console.error('[Engine] Worker error:', res.error.message);
-                if (this.onError) this.onError(res.error.message);
-            }
-        };
+        this.worker.onmessage = (e: MessageEvent<WorkerResponse>) => this.handle(e.data);
     }
 
-    public processImage(file: File, params: Params) {
-        this.currentParams = params;
-        this.currentFile = file;
-        console.log('[Engine] Processing image...');
-        const img = new Image();
-        img.onerror = () => {
-            console.error("Failed to load image.");
-            if (this.onError) this.onError("Failed to decode image file.");
-        };
-        img.onload = () => {
-            const scale = Math.min(params.preview.previewMaxEdge / img.width, params.preview.previewMaxEdge / img.height, 1);
-            const pWidth = Math.round(img.width * scale);
-            const pHeight = Math.round(img.height * scale);
-            console.log(`[Engine] Scaled ${img.width}x${img.height} -> ${pWidth}x${pHeight}`);
-
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = pWidth;
-            tempCanvas.height = pHeight;
-            const tCtx = tempCanvas.getContext('2d')!;
-            tCtx.drawImage(img, 0, 0, pWidth, pHeight);
-            const imageData = tCtx.getImageData(0, 0, pWidth, pHeight);
-
-            this.canvasLines.width = pWidth;
-            this.canvasLines.height = pHeight;
-            this.canvasBleed.width = pWidth;
-            this.canvasBleed.height = pHeight;
-            this.canvasOut.width = pWidth;
-            this.canvasOut.height = pHeight;
-
-            const reqId = 'map_' + Date.now();
-            this.currentWorkerRequestId = reqId;
-
-            this.worker?.postMessage({
-                type: 'BUILD_MAPS',
-                requestId: reqId,
-                input: {
-                    imageBuffer: imageData.data.buffer,
-                    width: pWidth,
-                    height: pHeight,
-                    previewWidth: pWidth,
-                    previewHeight: pHeight
-                },
-                params: params
-            }, [imageData.data.buffer]);
-        };
-        img.src = URL.createObjectURL(file);
+    private send(req: WorkerRequest, transfer: Transferable[] = []) {
+        this.worker.postMessage(req, transfer);
     }
 
-    public buildStrokes(params: Params) {
-        this.currentParams = params;
-        console.log('[Engine] Building strokes...');
-        const reqId = 'strk_' + Date.now();
-        this.currentWorkerRequestId = reqId;
-        this.worker?.postMessage({
-            type: 'BUILD_STROKES',
-            requestId: reqId,
-            params: params
+    private handle(res: WorkerResponse) {
+        if (res.type === 'ERROR') {
+            console.error('[Engine] Worker error:', res.error.message);
+            const pending = this.pendingExports.get(res.requestId);
+            if (pending) {
+                this.pendingExports.delete(res.requestId);
+                pending.reject(new Error(res.error.message));
+            } else if (this.onError) {
+                this.onError(res.error.message);
+            }
+            return;
+        }
+
+        if (res.type === 'PNG_READY') {
+            const pending = this.pendingExports.get(res.requestId);
+            if (!pending) return;
+            this.pendingExports.delete(res.requestId);
+            const blob = new Blob([res.buffer], { type: 'image/png' });
+            console.log(`[Engine] Export ${res.width}x${res.height}: trace ${res.ms.trace} ms, draw ${res.ms.draw} ms, encode ${res.ms.encode} ms, ${(blob.size / 1024).toFixed(0)} KB`);
+            downloadBlob(blob, 'lines.png');
+            pending.resolve({ width: res.width, height: res.height, bytes: blob.size });
+            return;
+        }
+
+        if (res.type === 'LINES_READY') {
+            if (res.requestId !== this.linesRequestId) return; // superseded
+            const c = this.canvasOut;
+            c.width = res.width;
+            c.height = res.height;
+            const ctx = c.getContext('2d')!;
+            ctx.putImageData(new ImageData(new Uint8ClampedArray(res.buffer), res.width, res.height), 0, 0);
+            console.log(`[Engine] ${res.strokeCount} lines ${res.width}x${res.height}: trace ${res.ms.trace} ms, draw ${res.ms.draw} ms`);
+            if (this.onRenderComplete) this.onRenderComplete();
+            return;
+        }
+
+        if (res.type === 'MAPS_READY') {
+            if (res.requestId !== this.mapsRequestId) return;
+            const { width, height, gradientMapBuffer } = res.maps;
+            this.canvasMaps.width = width;
+            this.canvasMaps.height = height;
+            const ctx = this.canvasMaps.getContext('2d')!;
+            ctx.putImageData(new ImageData(new Uint8ClampedArray(gradientMapBuffer), width, height), 0, 0);
+            if (this.onMapsReady) this.onMapsReady();
+        }
+    }
+
+    /** Decode the picture once, at working size, and hand it to the worker. */
+    public setImage(file: File) {
+        this.sourcePromise = new Promise<void>((resolve) => {
+            const url = URL.createObjectURL(file);
+            const img = new Image();
+            img.onerror = () => {
+                URL.revokeObjectURL(url);
+                if (this.onError) this.onError('Failed to decode image file.');
+                resolve();
+            };
+            img.onload = () => {
+                URL.revokeObjectURL(url);
+                this.origW = img.naturalWidth;
+                this.origH = img.naturalHeight;
+                const k = Math.min(1, WORK_EDGE / Math.max(img.naturalWidth, img.naturalHeight));
+                const w = Math.max(1, Math.round(img.naturalWidth * k));
+                const h = Math.max(1, Math.round(img.naturalHeight * k));
+                const c = document.createElement('canvas');
+                c.width = w;
+                c.height = h;
+                const ctx = c.getContext('2d')!;
+                ctx.imageSmoothingQuality = 'high';
+                ctx.drawImage(img, 0, 0, w, h);
+                const data = ctx.getImageData(0, 0, w, h);
+                this.send({ type: 'SET_SOURCE', requestId: `src_${++this.seq}`, buffer: data.data.buffer, width: w, height: h }, [data.data.buffer]);
+                resolve();
+            };
+            img.src = url;
         });
     }
 
-    public getStrokes(): StrokePath[] {
-        return this.lastStrokes;
+    /** Draw the lines at preview size. Completion is reported through onRenderComplete. */
+    public renderLines(params: Params) {
+        const id = `lines_${++this.seq}`;
+        this.linesRequestId = id;
+        this.sourcePromise.then(() => {
+            if (id !== this.linesRequestId) return;
+            const { w, h } = sizeForEdge(this.origW, this.origH, params.preview.previewMaxEdge);
+            this.send({ type: 'RENDER_LINES', requestId: id, lines: params.lines, outW: w, outH: h });
+        });
     }
 
-    public async exportPNG(params: Params): Promise<void> {
-        if (!this.currentFile) {
-            throw new Error('No image loaded for export.');
-        }
-        if (this.lastStrokes.length === 0) {
-            throw new Error('No strokes generated. Please process image first.');
-        }
-
-        console.log(`[Engine] Exporting ${this.lastStrokes.length} strokes at scale ${params.export.scale}...`);
-
-        let blob: Blob;
-        try {
-            blob = await exportLinesAsPNG(
-                this.currentFile,
-                this.lastStrokes,
-                params,
-                params.export.scale,
-                params.export.maxEdge
-            );
-        } catch (err: any) {
-            console.error('[Engine] Export rendering failed:', err);
-            throw err;
-        }
-
-        console.log(`[Engine] Blob created: ${(blob.size / 1024).toFixed(1)} KB, initiating download...`);
-
-        // Download the blob
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'lines.png';
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        a.click();
-
-        // Deferred cleanup to ensure download completes before URL is revoked
-        setTimeout(() => {
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        }, 3000);
-
-        console.log(`[Engine] Export complete! File size: ${(blob.size / 1024).toFixed(1)} KB`);
+    /** Build the gradient map for the Maps tab. */
+    public buildMaps(params: Params) {
+        const id = `maps_${++this.seq}`;
+        this.mapsRequestId = id;
+        this.sourcePromise.then(() => {
+            if (id !== this.mapsRequestId) return;
+            this.send({ type: 'BUILD_MAPS', requestId: id, params });
+        });
     }
 
-    /**
-     * Export the gradient map visualization as a PNG file.
-     */
+    /** Render at the chosen long edge in the worker and download the PNG. */
+    public async exportPNG(params: Params): Promise<ExportResult> {
+        await this.sourcePromise;
+        if (!this.origW) throw new Error('No image loaded for export.');
+        const edge = DEMO_MODE ? Math.min(params.export.edge, DEMO_MAX_EDGE) : params.export.edge;
+        const { w, h } = sizeForEdge(this.origW, this.origH, edge);
+        const id = `png_${++this.seq}`;
+        return new Promise<ExportResult>((resolve, reject) => {
+            this.pendingExports.set(id, { resolve, reject });
+            this.send({
+                type: 'EXPORT_PNG', requestId: id, lines: params.lines, outW: w, outH: h,
+                watermark: DEMO_MODE ? demoWatermarkMask(w, h) : undefined
+            });
+        });
+    }
+
+    /** Export the gradient map visualization as a PNG file. */
     public async exportMapPNG(): Promise<void> {
         if (this.canvasMaps.width === 0 || this.canvasMaps.height === 0) {
             throw new Error('No map generated yet. Please process an image first.');
         }
-
-        console.log(`[Engine] Exporting map ${this.canvasMaps.width}x${this.canvasMaps.height}...`);
 
         let source = this.canvasMaps;
         if (DEMO_MODE) {
@@ -188,7 +171,13 @@ export class AppEngine {
             demoCanvas.height = Math.floor(source.height * fit);
             const demoCtx = demoCanvas.getContext('2d')!;
             demoCtx.drawImage(source, 0, 0, demoCanvas.width, demoCanvas.height);
-            drawDemoWatermark(demoCtx, demoCanvas.width, demoCanvas.height);
+            const mark = demoWatermarkMask(demoCanvas.width, demoCanvas.height);
+            const img = demoCtx.getImageData(mark.x, mark.y, mark.w, mark.h);
+            for (let i = 0; i < mark.alpha.length; i++) {
+                const a = (mark.alpha[i] / 255) * 0.75;
+                for (let c = 0; c < 3; c++) img.data[i * 4 + c] = 128 * a + img.data[i * 4 + c] * (1 - a);
+            }
+            demoCtx.putImageData(img, mark.x, mark.y);
             source = demoCanvas;
         }
 
@@ -198,82 +187,9 @@ export class AppEngine {
                     reject(new Error('Map canvas to Blob failed.'));
                     return;
                 }
-
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'maps_gradient.png';
-                a.style.display = 'none';
-                document.body.appendChild(a);
-                a.click();
-
-                setTimeout(() => {
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                }, 3000);
-
-                console.log(`[Engine] Map export complete! File size: ${(blob.size / 1024).toFixed(1)} KB`);
+                downloadBlob(blob, 'maps_gradient.png');
                 resolve();
             }, 'image/png');
         });
-    }
-
-    /**
-     * Render strokes in small batches via requestAnimationFrame.
-     * Skips bleed pass entirely when bleed opacity is 0.
-     */
-    private renderBatched(strokes: StrokePath[], params: Params) {
-        this.renderAbort++;
-        const currentRender = this.renderAbort;
-
-        const width = this.canvasOut.width;
-        const height = this.canvasOut.height;
-        const ctxLines = this.canvasLines.getContext('2d')!;
-        const ctxBleed = this.canvasBleed.getContext('2d')!;
-        const ctxOut = this.canvasOut.getContext('2d')!;
-
-        ctxLines.clearRect(0, 0, width, height);
-        ctxBleed.clearRect(0, 0, width, height);
-
-        // Show white background immediately
-        ctxOut.clearRect(0, 0, width, height);
-        ctxOut.fillStyle = '#ffffff';
-        ctxOut.fillRect(0, 0, width, height);
-
-        const useBleed = params.inkBlur.bleedOpacityPct > 0;
-        const BATCH_SIZE = 200; // Reduced from 800 for much better responsiveness
-        let offset = 0;
-        let batchCount = 0;
-
-        console.time(`[Engine] Render (${strokes.length} strokes)`);
-
-        const drawBatch = () => {
-            if (currentRender !== this.renderAbort) return;
-
-            batchCount++;
-            const end = Math.min(offset + BATCH_SIZE, strokes.length);
-            const batch = strokes.slice(offset, end);
-
-            // Draw lines (always)
-            renderStrokes(ctxLines, batch, width, height, false, params.inkBlur, params.lines.blendMode);
-
-            // Draw bleed ONLY if enabled
-            if (useBleed) {
-                renderStrokes(ctxBleed, batch, width, height, true, params.inkBlur, params.lines.blendMode);
-            }
-
-            offset = end;
-
-            if (offset < strokes.length) {
-                requestAnimationFrame(drawBatch);
-            } else {
-                compositeLayers(ctxOut, this.canvasLines, this.canvasBleed, width, height, params.inkBlur);
-                console.timeEnd(`[Engine] Render (${strokes.length} strokes)`);
-                console.log(`[Engine] Rendering complete in ${batchCount} batches.`);
-                if (this.onRenderComplete) this.onRenderComplete();
-            }
-        };
-
-        requestAnimationFrame(drawBatch);
     }
 }

@@ -27,10 +27,10 @@ const Inspector = ({ demoLimited = false }: { demoLimited?: boolean }) => {
     const params = useAppStore(state => state.manifest.params);
     const updateParams = useAppStore(state => state.updateParams);
 
-    const handleLinesChange = (field: string, value: any) => updateParams('lines', { [field]: value });
-    const handleMapsChange = (field: string, value: any) => updateParams('maps', { [field]: value });
-    const handleInkBlurChange = (field: string, value: any) => updateParams('inkBlur', { [field]: value });
-    const handleExportChange = (field: string, value: any) => updateParams('export', { [field]: value });
+    const handleLinesChange = (field: string, value: unknown) => updateParams('lines', { [field]: value });
+    const handleMapsChange = (field: string, value: unknown) => updateParams('maps', { [field]: value });
+    const handleExportChange = (field: string, value: unknown) => updateParams('export', { [field]: value });
+    const isFlow = params.lines.mode === 'flow';
 
 
 
@@ -46,9 +46,9 @@ const Inspector = ({ demoLimited = false }: { demoLimited?: boolean }) => {
                             type="number"
                             className="number-input"
                             value={params.lines.seed}
-                            onChange={e => handleLinesChange('seed', parseInt(e.target.value) || 0)}
+                            onChange={e => handleLinesChange('seed', (parseInt(e.target.value) || 0) >>> 0)}
                         />
-                        <button onClick={() => handleLinesChange('seed', Math.floor(Math.random() * 999999))}>Random</button>
+                        <button onClick={() => handleLinesChange('seed', Math.floor(Math.random() * 999999) + 1)}>Random</button>
                     </div>
                 </div>
             </AccordionSection>
@@ -113,219 +113,114 @@ const Inspector = ({ demoLimited = false }: { demoLimited?: boolean }) => {
                     />
                 </div>
 
-                <div className="control-group" style={{ marginTop: '0.5rem' }}>
-                    <label className="control-header" style={{ cursor: 'pointer' }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            </AccordionSection>
+
+            <AccordionSection title="4. Lines" defaultExpanded>
+                <div className="control-group">
+                    <label className="control-header">Drawing</label>
+                    <select
+                        className="select-input"
+                        value={params.lines.mode}
+                        onChange={e => handleLinesChange('mode', e.target.value)}
+                    >
+                        <option value="flow">Flow (follows edges)</option>
+                        <option value="isolines">Isolines (luminance contours)</option>
+                    </select>
+                </div>
+
+                {isFlow ? (
+                    <>
+                        <div className="control-group">
+                            <label className="control-header">Spacing <span>{params.lines.spacing.toFixed(1)}x width</span></label>
                             <input
-                                type="checkbox"
-                                checked={params.maps.contoursEnabled}
-                                onChange={e => handleMapsChange('contoursEnabled', e.target.checked)}
-                            /> Enable Contours
-                        </span>
-                        <Info size={14} />
-                    </label>
-                </div>
+                                type="range" min="1.5" max="10" step="0.1"
+                                value={params.lines.spacing}
+                                onChange={e => handleLinesChange('spacing', parseFloat(e.target.value))}
+                                className="slider-input"
+                            />
+                        </div>
+                        <div className="control-group">
+                            <label className="control-header">Length <span>{params.lines.length.toFixed(1)}x</span></label>
+                            <input
+                                type="range" min="0.3" max="3" step="0.1"
+                                value={params.lines.length}
+                                onChange={e => handleLinesChange('length', parseFloat(e.target.value))}
+                                className="slider-input"
+                            />
+                        </div>
+                        <div className="control-group">
+                            <label className="control-header">Flat-area ink <span>{Math.round(params.lines.calm * 100)}%</span></label>
+                            <input
+                                type="range" min="0" max="1" step="0.02"
+                                value={params.lines.calm}
+                                onChange={e => handleLinesChange('calm', parseFloat(e.target.value))}
+                                className="slider-input"
+                            />
+                        </div>
+                    </>
+                ) : (
+                    <>
+                        <div className="control-group">
+                            <label className="control-header">Levels <span>{params.lines.levels}</span></label>
+                            <input
+                                type="range" min="8" max="90" step="1"
+                                value={params.lines.levels}
+                                onChange={e => handleLinesChange('levels', parseInt(e.target.value))}
+                                className="slider-input"
+                            />
+                        </div>
+                        <div className="control-group">
+                            <label className="control-header">Shortest contour <span>{params.lines.minLength} px</span></label>
+                            <input
+                                type="range" min="4" max="120" step="2"
+                                value={params.lines.minLength}
+                                onChange={e => handleLinesChange('minLength', parseInt(e.target.value))}
+                                className="slider-input"
+                            />
+                        </div>
+                    </>
+                )}
 
-                <div className="control-group" style={{ opacity: params.maps.contoursEnabled ? 1 : 0.5 }}>
-                    <label className="control-header">Contour Levels <span>{params.maps.contourLevels}</span></label>
+                <div className="control-group">
+                    <label className="control-header">Line width <span>{params.lines.width.toFixed(1)} px</span></label>
                     <input
-                        type="range" min="3" max="40"
-                        value={params.maps.contourLevels}
-                        onChange={e => handleMapsChange('contourLevels', parseInt(e.target.value))}
-                        disabled={!params.maps.contoursEnabled}
+                        type="range" min="0.3" max="4" step="0.1"
+                        value={params.lines.width}
+                        onChange={e => handleLinesChange('width', parseFloat(e.target.value))}
                         className="slider-input"
                     />
                 </div>
-            </AccordionSection>
 
-            <AccordionSection title="4. Lines">
                 <div className="control-group">
-                    <label className="control-header">Source Mode</label>
+                    <label className="control-header">Background</label>
                     <select
                         className="select-input"
-                        value={params.lines.sourceMode}
-                        onChange={e => handleLinesChange('sourceMode', e.target.value)}
+                        value={params.lines.background}
+                        onChange={e => handleLinesChange('background', e.target.value)}
                     >
-                        <option value="Edges">Edges Only</option>
-                        <option value="Contours">Contours Only</option>
-                        <option value="Hybrid">Hybrid</option>
-                    </select>
-                </div>
-
-                <div className="control-group">
-                    <label className="control-header">Stroke Density <span>{params.lines.strokeDensity.toFixed(1)}</span></label>
-                    <input
-                        type="range" min="0.1" max="8" step="0.1"
-                        value={params.lines.strokeDensity}
-                        onChange={e => handleLinesChange('strokeDensity', parseFloat(e.target.value))}
-                        className="slider-input"
-                    />
-                </div>
-
-                <div className="control-group">
-                    <label className="control-header">Randomness <span>{params.lines.randomness}%</span></label>
-                    <input
-                        type="range" min="0" max="100"
-                        value={params.lines.randomness}
-                        onChange={e => handleLinesChange('randomness', parseInt(e.target.value))}
-                        className="slider-input"
-                    />
-                </div>
-                <div className="control-group">
-                    <label className="control-header">Wobble Amp <span>{params.lines.wobbleAmp.toFixed(1)}</span></label>
-                    <input
-                        type="range" min="0" max="3" step="0.1"
-                        value={params.lines.wobbleAmp}
-                        onChange={e => handleLinesChange('wobbleAmp', parseFloat(e.target.value))}
-                        className="slider-input"
-                    />
-                </div>
-                <div className="control-group">
-                    <label className="control-header">Roughness <span>{params.lines.roughness?.toFixed(1) || 0}</span></label>
-                    <input
-                        type="range" min="0" max="5" step="0.1"
-                        value={params.lines.roughness || 0}
-                        onChange={e => handleLinesChange('roughness', parseFloat(e.target.value))}
-                        className="slider-input"
-                    />
-                </div>
-                
-                <div style={{ marginTop: '0.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.5rem' }}></div>
-
-                <div className="control-group">
-                    <label className="control-header">Line Blend Mode</label>
-                    <select
-                        className="select-input"
-                        value={params.lines.blendMode || 'normal'}
-                        onChange={e => handleLinesChange('blendMode', e.target.value)}
-                    >
-                        <option value="normal">Normal</option>
-                        <option value="multiply">Multiply (Ink Accumulation)</option>
-                        <option value="screen">Screen (Light)</option>
-                    </select>
-                </div>
-                
-                <div className="control-group">
-                    <label className="control-header">Color Mode</label>
-                    <select
-                        className="select-input"
-                        value={params.lines.colorMode || 'Image'}
-                        onChange={e => handleLinesChange('colorMode', e.target.value)}
-                    >
-                        <option value="Image">Image Colors</option>
-                        <option value="Monochrome">Monochrome</option>
-                        <option value="Prism">Prism Neon (Data Art)</option>
-                    </select>
-                </div>
-
-                <div className="control-group">
-                    <label className="control-header">Min Width (px)<span>{params.lines.widthMin.toFixed(2)}</span></label>
-                    <input
-                        type="range" min="0.05" max="2.0" step="0.05"
-                        value={params.lines.widthMin}
-                        onChange={e => handleLinesChange('widthMin', parseFloat(e.target.value))}
-                        className="slider-input"
-                    />
-                </div>
-                <div className="control-group">
-                    <label className="control-header">Max Width (px)<span>{params.lines.widthMax.toFixed(2)}</span></label>
-                    <input
-                        type="range" min="0.1" max="6.0" step="0.1"
-                        value={params.lines.widthMax}
-                        onChange={e => handleLinesChange('widthMax', parseFloat(e.target.value))}
-                        className="slider-input"
-                    />
-                </div>
-
-                <div style={{ marginTop: '0.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.5rem' }}></div>
-                
-                <div className="control-group">
-                    <label className="control-header">Waveform Amp <span>{params.lines.waveAmp?.toFixed(1) || 0}</span></label>
-                    <input
-                        type="range" min="0" max="25" step="0.5"
-                        value={params.lines.waveAmp || 0}
-                        onChange={e => handleLinesChange('waveAmp', parseFloat(e.target.value))}
-                        className="slider-input"
-                    />
-                </div>
-                <div className="control-group">
-                    <label className="control-header">Waveform Freq <span>{params.lines.waveFreq?.toFixed(2) || 0.1}</span></label>
-                    <input
-                        type="range" min="0.05" max="3.0" step="0.05"
-                        value={params.lines.waveFreq || 0.1}
-                        onChange={e => handleLinesChange('waveFreq', parseFloat(e.target.value))}
-                        className="slider-input"
-                    />
-                </div>
-            </AccordionSection>
-
-            <AccordionSection title="5. Ink & Blur">
-                <div className="control-group">
-                    <label className="control-header">Bleed Amount (px) <span>{params.inkBlur.bleedAmountPx.toFixed(1)}</span></label>
-                    <input
-                        type="range" min="0" max="10" step="0.5"
-                        value={params.inkBlur.bleedAmountPx}
-                        onChange={e => handleInkBlurChange('bleedAmountPx', parseFloat(e.target.value))}
-                        className="slider-input"
-                    />
-                </div>
-                <div className="control-group">
-                    <label className="control-header">Bleed Blur (px) <span>{params.inkBlur.bleedBlurPx.toFixed(1)}</span></label>
-                    <input
-                        type="range" min="0" max="8" step="0.5"
-                        value={params.inkBlur.bleedBlurPx}
-                        onChange={e => handleInkBlurChange('bleedBlurPx', parseFloat(e.target.value))}
-                        className="slider-input"
-                    />
-                </div>
-
-                <div className="control-group">
-                    <label className="control-header">Bleed Mode</label>
-                    <select
-                        className="select-input"
-                        value={params.inkBlur.bleedMode}
-                        onChange={e => handleInkBlurChange('bleedMode', e.target.value)}
-                    >
-                        <option value="Normal">Normal</option>
-                        <option value="Multiply">Multiply</option>
+                        <option value="black">Black</option>
+                        <option value="transparent">Transparent (PNG alpha)</option>
                     </select>
                 </div>
             </AccordionSection>
 
-            <AccordionSection title="6. Export">
+            <AccordionSection title="5. Export">
                 <div className="control-group">
-                    <label className="control-header">Export Scale</label>
+                    <label className="control-header">Export size (long edge)</label>
                     <select
                         className="select-input"
-                        value={DEMO_MODE ? 1 : params.export.scale}
-                        onChange={e => handleExportChange('scale', parseInt(e.target.value))}
+                        value={DEMO_MODE ? 1024 : params.export.edge}
+                        onChange={e => handleExportChange('edge', parseInt(e.target.value))}
                     >
-                        <option value="1">1x (Original Size)</option>
-                        <option value="2" disabled={DEMO_MODE}>2x</option>
-                        <option value="3" disabled={DEMO_MODE}>3x</option>
-                        <option value="4" disabled={DEMO_MODE}>4x</option>
+                        <option value="1024">1024 px</option>
+                        <option value="2048" disabled={DEMO_MODE}>2048 px</option>
+                        <option value="4096" disabled={DEMO_MODE}>4096 px</option>
                     </select>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
                         {DEMO_MODE
-                            ? `Demo: 1x only, capped at ${DEMO_MAX_EDGE}px maximum edge.`
-                            : 'Will be capped at 8192px maximum edge.'}
+                            ? `Demo: capped at ${DEMO_MAX_EDGE} px with a watermark.`
+                            : params.lines.background === 'transparent' ? 'PNG with transparent background.' : 'PNG on black.'}
                     </div>
-                </div>
-
-                <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem' }}>
-                        <input
-                            type="checkbox"
-                            checked={params.export.targets.includes('lines')}
-                            onChange={e => {
-                                const target = 'lines';
-                                const targets = e.target.checked
-                                    ? [...params.export.targets, target]
-                                    : params.export.targets.filter(t => t !== target);
-                                handleExportChange('targets', targets);
-                            }}
-                        /> Export Lines (Transparent PNG)
-                    </label>
                 </div>
 
                 <button
