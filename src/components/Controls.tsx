@@ -1,22 +1,33 @@
 import { useAppStore, LOOKS } from '../store/useAppStore';
 import { DEMO_MODE, DEMO_MAX_EDGE } from '../config';
-import type { ExportEdge } from '../core/types';
+import type { ExportEdge, MotionMode } from '../core/types';
+import { LENGTH_MAX, LENGTH_MIN } from '../core/lines/motion';
 import type { SpectrumCell } from '../core/lines/spectrum';
 
 interface ControlsProps {
     onExport: () => void;
+    onExportVideo: () => void;
 }
+
+const MOTIONS: { id: MotionMode; label: string; note: string }[] = [
+    { id: 'still', label: 'Still', note: 'The drawing, at rest.' },
+    { id: 'emerge', label: 'Emerge', note: 'Each line grows along its flow.' },
+    { id: 'pulse', label: 'Pulse', note: 'Light travels along each line, and loops.' }
+];
 
 function cellName(cell: SpectrumCell): string {
     return cell.wl === null ? 'Purples' : `${Math.round(cell.wl)} nm`;
 }
 
-export default function Controls({ onExport }: ControlsProps) {
+export default function Controls({ onExport, onExportVideo }: ControlsProps) {
     const lines = useAppStore(s => s.params.lines);
     const exportEdge = useAppStore(s => s.params.export.edge);
     const activeLookId = useAppStore(s => s.activeLookId);
     const isExporting = useAppStore(s => s.isExporting);
     const spectrum = useAppStore(s => s.spectrum);
+    const motion = useAppStore(s => s.params.motion);
+    const exportProgress = useAppStore(s => s.exportProgress);
+    const updateMotion = useAppStore(s => s.updateMotion);
     const applyLook = useAppStore(s => s.applyLook);
     const updateLines = useAppStore(s => s.updateLines);
     const updateExport = useAppStore(s => s.updateExport);
@@ -24,6 +35,9 @@ export default function Controls({ onExport }: ControlsProps) {
     const clearSolo = useAppStore(s => s.clearSolo);
 
     const isPrism = lines.mode === 'spectrum';
+    const moving = motion.mode !== 'still';
+    const videoOn = moving && !DEMO_MODE;
+    const exportingVideo = exportProgress !== null;
     const solo = lines.solo;
     const tallest = spectrum ? Math.max(...spectrum.map(c => c.share), 1e-9) : 1;
 
@@ -131,6 +145,39 @@ export default function Controls({ onExport }: ControlsProps) {
                 </section>
             )}
 
+            <section className="section" aria-labelledby="motion-title">
+                <div className="field-head">
+                    <h2 className="section-title" id="motion-title">Motion</h2>
+                    <div className="motion-chips" role="group" aria-labelledby="motion-title">
+                        {MOTIONS.map(m => (
+                            <button
+                                key={m.id}
+                                type="button"
+                                className="chip"
+                                aria-pressed={motion.mode === m.id}
+                                title={m.note}
+                                onClick={() => updateMotion({ mode: m.id })}
+                            >
+                                {m.label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+                {moving && (
+                    <div className="field-group">
+                        <div className="field-head">
+                            <label className="field-label" htmlFor="length">Length</label>
+                            <span className="field-value">{motion.length} s</span>
+                        </div>
+                        <input
+                            id="length" type="range" min={LENGTH_MIN} max={LENGTH_MAX} step="1"
+                            value={motion.length}
+                            onChange={e => updateMotion({ length: parseInt(e.target.value) })}
+                        />
+                    </div>
+                )}
+            </section>
+
             <section className="section" aria-labelledby="export-title">
                 <h2 className="section-title" id="export-title">Export</h2>
                 <div className="field-group">
@@ -147,13 +194,28 @@ export default function Controls({ onExport }: ControlsProps) {
                     </select>
                     {DEMO_MODE && <p className="note" id="export-note">{`Demo: ${DEMO_MAX_EDGE} px, with a watermark.`}</p>}
                 </div>
+                {videoOn && (
+                    <>
+                        <p className="note" id="video-note">MP4: 1080 px, 30 fps, no sound, on black.</p>
+                        <button
+                            type="button"
+                            className="btn-fill btn-wide"
+                            aria-disabled={isExporting}
+                            aria-describedby="video-note"
+                            onClick={() => { if (!isExporting) onExportVideo(); }}
+                        >
+                            {exportingVideo ? `Exporting ${Math.round((exportProgress ?? 0) * 100)} %` : 'Export MP4'}
+                        </button>
+                    </>
+                )}
+                {moving && DEMO_MODE && <p className="note">Video export is part of the full version.</p>}
                 <button
                     type="button"
-                    className={`${isExporting ? 'btn' : 'btn-fill'} btn-wide`}
+                    className={`${videoOn || isExporting ? 'btn' : 'btn-fill'} btn-wide`}
                     aria-disabled={isExporting}
                     onClick={() => { if (!isExporting) onExport(); }}
                 >
-                    {isExporting ? 'Exporting…' : 'Export PNG'}
+                    {isExporting && !exportingVideo ? 'Exporting…' : 'Export PNG'}
                 </button>
             </section>
         </aside>

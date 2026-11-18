@@ -1,4 +1,4 @@
-import type { Params } from './types';
+import type { Params, MotionParams } from './types';
 import type { WorkerRequest, WorkerResponse } from './worker/messageTypes';
 import type { SpectrumCell } from './lines/spectrum';
 import { sizeForEdge, WORK_EDGE } from './lines/render';
@@ -16,6 +16,7 @@ export interface ExportResult {
 
 interface PendingExport {
     filename: string;
+    onProgress?: (done: number, total: number) => void;
     resolve: (r: ExportResult) => void;
     reject: (e: Error) => void;
 }
@@ -30,6 +31,7 @@ export class AppEngine {
     private linesRequestId = '';
     private spectrumRequestId = '';
     private pendingExports = new Map<string, PendingExport>();
+    private pendingFrames = new Map<string, (ok: boolean) => void>();
 
     public onRenderComplete?: () => void;
     public onSpectrum?: (cells: SpectrumCell[]) => void;
@@ -48,6 +50,8 @@ export class AppEngine {
     private handle(res: WorkerResponse) {
         if (res.type === 'ERROR') {
             console.error('[Engine] Worker error:', res.error.message);
+            const frame = this.pendingFrames.get(res.requestId);
+            if (frame) { this.pendingFrames.delete(res.requestId); frame(false); }
             const pending = this.pendingExports.get(res.requestId);
             if (pending) {
                 this.pendingExports.delete(res.requestId);
@@ -64,6 +68,33 @@ export class AppEngine {
             this.pendingExports.delete(res.requestId);
             const blob = new Blob([res.buffer], { type: 'image/png' });
             console.log(`[Engine] Export ${res.width}x${res.height}: trace ${res.ms.trace} ms, draw ${res.ms.draw} ms, encode ${res.ms.encode} ms, ${(blob.size / 1024).toFixed(0)} KB`);
+            downloadBlob(blob, pending.filename);
+            pending.resolve({ width: res.width, height: res.height, bytes: blob.size });
+            return;
+        }
+
+        if (res.type === 'FRAME_READY') {
+            const done = this.pendingFrames.get(res.requestId);
+            if (!done) return;
+            this.pendingFrames.delete(res.requestId);
+            const c = this.canvasOut;
+            if (c.width !== res.width || c.height !== res.height) { c.width = res.width; c.height = res.height; }
+            c.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(res.buffer), res.width, res.height), 0, 0);
+            done(true);
+            return;
+        }
+
+        if (res.type === 'MP4_PROGRESS') {
+            this.pendingExports.get(res.requestId)?.onProgress?.(res.done, res.total);
+            return;
+        }
+
+        if (res.type === 'MP4_READY') {
+            const pending = this.pendingExports.get(res.requestId);
+            if (!pending) return;
+            this.pendingExports.delete(res.requestId);
+            const blob = new Blob([res.buffer], { type: 'video/mp4' });
+            console.log(`[Engine] MP4 ${res.width}x${res.height}, ${res.frames} frames, H.264 level ${res.level}: trace ${res.ms.trace} ms, plan ${res.ms.plan} ms, encode ${res.ms.encode} ms, ${(blob.size / 1024).toFixed(0)} KB`);
             downloadBlob(blob, pending.filename);
             pending.resolve({ width: res.width, height: res.height, bytes: blob.size });
             return;
@@ -126,6 +157,32 @@ export class AppEngine {
             if (id !== this.linesRequestId) return;
             const { w, h } = sizeForEdge(this.origW, this.origH, PREVIEW_EDGE);
             this.send({ type: 'RENDER_LINES', requestId: id, lines: params.lines, outW: w, outH: h });
+        });
+    }
+
+    /**
+     * Draw one frame of the motion at time t (seconds) on the stage. Every frame is drawn on its own, so a request
+     * never depends on the one before it. Resolves true when the frame was drawn, false if the worker failed.
+     */
+    public renderFrame(params: Params, motion: MotionParams, t: number): Promise<boolean> {
+        const id = `frame_${++this.seq}`;
+        return this.sourcePromise.then(() => new Promise<boolean>((resolve) => {
+            const { w, h } = sizeForEdge(this.origW, this.origH, PREVIEW_EDGE);
+            this.pendingFrames.set(id, resolve);
+            this.send({ type: 'RENDER_FRAME', requestId: id, lines: params.lines, motion, outW: w, outH: h, t });
+        }));
+    }
+
+    /** Render the clip in the worker (1080 px on the long edge, 30 fps, H.264, no sound) and download it. */
+    public async exportMP4(params: Params, filename: (size: { width: number; height: number }) => string, onProgress?: (done: number, total: number) => void): Promise<ExportResult> {
+        await this.sourcePromise;
+        if (!this.origW) throw new Error('No image loaded for export.');
+        const id = `mp4_${++this.seq}`;
+        return new Promise<ExportResult>((resolve, reject) => {
+            // The name needs the size the worker chooses; it is the long edge, so a placeholder size is enough here.
+            const { w, h } = sizeForEdge(this.origW, this.origH, 1080);
+            this.pendingExports.set(id, { filename: filename({ width: w, height: h }), resolve, reject, onProgress });
+            this.send({ type: 'EXPORT_MP4', requestId: id, lines: params.lines, motion: params.motion });
         });
     }
 

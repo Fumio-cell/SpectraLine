@@ -3,6 +3,8 @@ import type { Params } from '../types';
 import { analyse, buildStrokes, drawLines, geometryKey, sigmaOfScale, type Field, type StrokeSet } from '../lines/render';
 import { measureBands, spectrumCells } from '../lines/spectrum';
 import { encodePNG } from '../lines/png';
+import { buildPlan, prepareMotion, renderFrame, type MotionPlan, type MotionTables } from '../lines/motion';
+import { encodeMp4, videoSize } from '../video';
 
 /** The spectrum is always measured in 9 bands plus the purples. */
 const SPECTRUM_BANDS = 9;
@@ -24,6 +26,29 @@ function getStrokes(lines: Params['lines']): { set: StrokeSet; field: Field; tra
         strokeCache = { key, set: buildStrokes(field, lines) };
     }
     return { set: strokeCache.set, field, traceMs: Math.round(performance.now() - t0) };
+}
+
+// Motion: the still with its per-pixel numbers, and the per-stroke timing of the clip. A cache of the settings.
+let planCache: { key: string; plan: MotionPlan } | null = null;
+let tablesCache: { key: string; tables: MotionTables } | null = null;
+
+function getPlan(lines: Params['lines'], w: number, h: number): { plan: MotionPlan; traceMs: number; planMs: number } {
+    const { set, field: f, traceMs } = getStrokes(lines);
+    const key = [geometryKey(lines), lines.contrast, lines.solo.join(','), w, h].join('|');
+    let planMs = 0;
+    if (!planCache || planCache.key !== key) {
+        const t0 = performance.now();
+        planCache = { key, plan: buildPlan(f, set, lines, w, h) };
+        tablesCache = null;
+        planMs = Math.round(performance.now() - t0);
+    }
+    return { plan: planCache.plan, traceMs, planMs };
+}
+
+function getTables(plan: MotionPlan, mode: MotionTables['mode'], length: number): MotionTables {
+    const key = `${planCache?.key}|${mode}|${length}`;
+    if (!tablesCache || tablesCache.key !== key) tablesCache = { key, tables: prepareMotion(plan, mode, length) };
+    return tablesCache.tables;
 }
 
 function applyWatermark(rgba: Uint8ClampedArray, width: number, mark: WatermarkMask) {
@@ -55,6 +80,8 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
             source = { w: req.width, h: req.height, rgba: new Uint8ClampedArray(req.buffer) };
             field = null;
             strokeCache = null;
+            planCache = null;
+            tablesCache = null;
         }
 
         else if (req.type === 'GET_SPECTRUM') {
@@ -73,6 +100,32 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
                 width: req.outW, height: req.outH, buffer: rgba.buffer, strokeCount: set.count,
                 ms: { trace: traceMs, draw: drawMs }
             } as WorkerResponse, [rgba.buffer]);
+        }
+
+        else if (req.type === 'RENDER_FRAME') {
+            const { plan, planMs } = getPlan(req.lines, req.outW, req.outH);
+            const tables = getTables(plan, req.motion.mode, req.motion.length);
+            const t0 = performance.now();
+            const rgba = renderFrame(plan, tables, req.t);
+            post({
+                type: 'FRAME_READY', requestId: req.requestId, status: 'ok',
+                width: req.outW, height: req.outH, buffer: rgba.buffer,
+                ms: { plan: planMs, frame: Math.round((performance.now() - t0) * 10) / 10 }
+            } as WorkerResponse, [rgba.buffer]);
+        }
+
+        else if (req.type === 'EXPORT_MP4') {
+            if (!source) throw new Error('No image loaded');
+            const { w, h } = videoSize(source.w, source.h);
+            const { plan, traceMs, planMs } = getPlan(req.lines, w, h);
+            const tables = getTables(plan, req.motion.mode, req.motion.length);
+            const t0 = performance.now();
+            const r = await encodeMp4(plan, tables, (done, total) => post({ type: 'MP4_PROGRESS', requestId: req.requestId, done, total } as WorkerResponse));
+            post({
+                type: 'MP4_READY', requestId: req.requestId, status: 'ok',
+                buffer: r.bytes.buffer, width: r.width, height: r.height, frames: r.frames, level: r.level,
+                ms: { trace: traceMs, plan: planMs, encode: Math.round(performance.now() - t0) }
+            } as WorkerResponse, [r.bytes.buffer]);
         }
 
         else if (req.type === 'EXPORT_PNG') {

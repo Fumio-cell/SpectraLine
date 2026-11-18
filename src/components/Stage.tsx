@@ -6,6 +6,9 @@ import { DEMO_MODE, DEMO_MAX_EDGE, BUY_URL } from '../config';
 
 type View = 'drawing' | 'original' | 'compare';
 
+/** After EMERGE completes the finished drawing stays for this long before the clip starts again. */
+const EMERGE_HOLD = 1.2;
+
 const VIEWS: { id: View; label: string }[] = [
     { id: 'original', label: 'Original' },
     { id: 'drawing', label: 'Drawing' },
@@ -26,6 +29,9 @@ export default function Stage({ onEngineReady, demoLimited }: StageProps) {
     const isProcessing = useAppStore(s => s.isProcessing);
     const notice = useAppStore(s => s.notice);
     const spectrum = useAppStore(s => s.spectrum);
+    const playing = useAppStore(s => s.playing);
+    const isExporting = useAppStore(s => s.isExporting);
+    const setPlaying = useAppStore(s => s.setPlaying);
     const setProcessing = useAppStore(s => s.setProcessing);
     const setSpectrum = useAppStore(s => s.setSpectrum);
 
@@ -33,6 +39,11 @@ export default function Stage({ onEngineReady, demoLimited }: StageProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const prevLinesRef = useRef('');
     const prevFileRef = useRef<File | null>(null);
+    const stillFileRef = useRef<File | null>(null);
+    // Where the clip is, in seconds: `base` at the moment playing last (re)started at `start` (performance.now()).
+    const clockRef = useRef({ base: 0, start: 0 });
+    const motion = params.motion;
+    const moving = motion.mode !== 'still';
 
     // The drawing depends on every drawing setting (contrast only redraws; the worker decides).
     const linesKey = useMemo(() => JSON.stringify(params.lines), [params.lines]);
@@ -52,22 +63,30 @@ export default function Stage({ onEngineReady, demoLimited }: StageProps) {
         engine.requestSpectrum();
     }, [input.file, activeLookId, spectrum, setSpectrum]);
 
-    // One debounced entry point for everything that needs (re)drawing.
+    // The picture goes to the worker once, as soon as it is chosen.
+    useEffect(() => {
+        const engine = engineRef.current;
+        if (!engine || !input.file || input.file === prevFileRef.current) return;
+        prevFileRef.current = input.file;
+        engine.setImage(input.file);
+    }, [input.file]);
+
+    // STILL: one debounced entry point for everything that needs (re)drawing. Motion draws its own frames.
     useEffect(() => {
         const engine = engineRef.current;
         if (!engine || !input.file) return;
+        if (moving) { prevLinesRef.current = ''; return; } // coming back to STILL draws it again
 
-        const fileChanged = input.file !== prevFileRef.current;
+        const fileChanged = input.file !== stillFileRef.current;
         const linesChanged = linesKey !== prevLinesRef.current;
         if (!fileChanged && !linesChanged) return;
 
         const timeout = setTimeout(() => {
             if (!input.file) return;
             // Remember what has really been sent, so a cancelled timer does not lose a change.
-            prevFileRef.current = input.file;
+            stillFileRef.current = input.file;
             prevLinesRef.current = linesKey;
 
-            if (fileChanged) engine.setImage(input.file);
             setProcessing(true);
             // The engine drops superseded results, so a completion is always for the latest request.
             engine.onRenderComplete = () => setProcessing(false);
@@ -77,7 +96,45 @@ export default function Stage({ onEngineReady, demoLimited }: StageProps) {
 
         return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [input.file, linesKey]);
+    }, [input.file, linesKey, moving]);
+
+    // MOTION: draw the frame for the time it is, as fast as the worker returns them. Each frame is drawn on its
+    // own, so skipping ahead when a frame is slow costs nothing. Paused, it draws the held frame once.
+    useEffect(() => {
+        const engine = engineRef.current;
+        if (!engine || !input.file || !moving || view === 'original' || isExporting) return;
+        const { mode, length } = motion;
+        const clock = clockRef.current;
+        const running = playing;
+        if (running) clock.start = performance.now();
+        const elapsed = () => clock.base + (running ? (performance.now() - clock.start) / 1000 : 0);
+        const timeOf = (el: number) => mode === 'pulse' ? el % length : Math.min(el % (length + EMERGE_HOLD), length);
+
+        let alive = true;
+        let raf = 0;
+        let busy = false;
+        let first = true;
+        engine.onError = () => setProcessing(false);
+        const draw = () => {
+            if (!alive || busy) return;
+            busy = true;
+            if (first) setProcessing(true);
+            void engine.renderFrame(params, motion, timeOf(elapsed())).then(() => {
+                busy = false;
+                if (first) { first = false; if (alive) setProcessing(false); }
+                if (alive && running) raf = requestAnimationFrame(draw);
+            });
+        };
+        draw();
+
+        return () => {
+            alive = false;
+            cancelAnimationFrame(raf);
+            if (running) clock.base += (performance.now() - clock.start) / 1000;
+            setProcessing(false);
+        };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [input.file, linesKey, moving, motion.mode, motion.length, playing, view, isExporting]);
 
     const look = LOOKS.find(l => l.presetId === activeLookId) ?? LOOKS[0];
     const showOriginal = view !== 'drawing';
@@ -102,7 +159,14 @@ export default function Stage({ onEngineReady, demoLimited }: StageProps) {
                         </button>
                     ))}
                 </div>
-                <p className="note stage-status" role="status">{isProcessing ? 'Drawing…' : ''}</p>
+                <div className="stage-bar-end">
+                    {moving && view !== 'original' && (
+                        <button type="button" className="btn btn-small" onClick={() => setPlaying(!playing)} disabled={isExporting}>
+                            {playing ? 'Pause' : 'Play'}
+                        </button>
+                    )}
+                    <p className="note stage-status" role="status">{isProcessing ? 'Drawing…' : ''}</p>
+                </div>
             </div>
 
             {notice && (

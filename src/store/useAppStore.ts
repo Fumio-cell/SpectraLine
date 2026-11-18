@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { DEFAULT_CONTRAST } from '../core/lines/raster';
 import { DEFAULT_SCALE } from '../core/lines/field';
+import { LENGTH_DEFAULT } from '../core/lines/motion';
 import type { Params, Look, LookParams, ProjectInput } from '../core/types';
 import type { SpectrumCell } from '../core/lines/spectrum';
 
@@ -11,6 +12,7 @@ const flow: LookParams = { mode: 'flow', spacing: 2.4, length: 1, calm: 0.04, ba
 
 const defaultParams: Params = {
     lines: { ...flow, background: 'black', seed: DEFAULT_SEED, contrast: DEFAULT_CONTRAST, scale: DEFAULT_SCALE, solo: [] },
+    motion: { mode: 'still', length: LENGTH_DEFAULT },
     export: { edge: 2048 }
 };
 
@@ -31,6 +33,10 @@ interface AppState {
     activeLookId: string;
     isProcessing: boolean;
     isExporting: boolean;
+    /** MOTION: the stage is playing (false = paused on the current frame). */
+    playing: boolean;
+    /** Progress of a video export, 0..1, or null when none is running. */
+    exportProgress: number | null;
     /** A message shown on the page (errors and notes), or null. */
     notice: string | null;
     /** PRISM: the picture's own measured spectrum (one cell per band), once the worker has it. */
@@ -38,6 +44,9 @@ interface AppState {
     setInput: (input: Partial<ProjectInput>) => void;
     updateLines: (update: Partial<Params['lines']>) => void;
     updateExport: (update: Partial<Params['export']>) => void;
+    updateMotion: (update: Partial<Params['motion']>) => void;
+    setPlaying: (playing: boolean) => void;
+    setExportProgress: (p: number | null) => void;
     applyLook: (lookId: string) => void;
     setProcessing: (isProcessing: boolean) => void;
     setExporting: (isExporting: boolean) => void;
@@ -53,6 +62,8 @@ export const useAppStore = create<AppState>((set) => ({
     activeLookId: 'flow',
     isProcessing: false,
     isExporting: false,
+    playing: true,
+    exportProgress: null,
     notice: null,
     spectrum: null,
 
@@ -67,6 +78,10 @@ export const useAppStore = create<AppState>((set) => ({
     updateLines: (update) => set((state) => ({ params: { ...state.params, lines: { ...state.params.lines, ...update } } })),
 
     updateExport: (update) => set((state) => ({ params: { ...state.params, export: { ...state.params.export, ...update } } })),
+
+    updateMotion: (update) => set((state) => ({ params: { ...state.params, motion: { ...state.params.motion, ...update } } })),
+    setPlaying: (playing) => set({ playing }),
+    setExportProgress: (exportProgress) => set({ exportProgress }),
 
     // A look sets the drawing parameters it defines; seed, background, contrast and export size stay as chosen.
     applyLook: (lookId) => set((state) => {

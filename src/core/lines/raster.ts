@@ -23,6 +23,20 @@ export const energyCurve = (e: number, contrast: number) => Math.pow(e, contrast
 export const energyWidth = (e: number, contrast: number) => 0.5 + 0.9 * energyCurve(e, contrast);
 export const energyAlpha = (e: number, contrast: number) => 0.06 + 0.94 * energyCurve(e, contrast);
 
+/**
+ * What motion needs to know about every pixel the still paints, filled while the still is drawn:
+ * which stroke paints it most, and how far along that stroke it lies in travel time (see motion.ts).
+ * Reading these never changes a pixel of the still.
+ */
+export interface RasterAux {
+    /** Travel time at each stroke vertex, in the units of motion.ts (one number per vertex of the StrokeSet). */
+    vertexPhi: Float32Array;
+    /** Per output pixel: the stroke that paints it most (-1 where nothing is painted), its travel time, and its weight. */
+    sid: Int32Array;
+    phi: Float32Array;
+    best: Float32Array;
+}
+
 export interface RasterOptions {
     /** Source (working) size the strokes live in. */
     srcW: number;
@@ -36,6 +50,8 @@ export interface RasterOptions {
     contrast?: number;
     /** SPECTRUM: draw only the strokes of these bands. */
     solo?: number[];
+    /** Motion: record, per pixel, the stroke and travel time that paint it. */
+    aux?: RasterAux;
 }
 
 export function rasterize(set: StrokeSet, o: RasterOptions): Uint8ClampedArray {
@@ -46,6 +62,7 @@ export function rasterize(set: StrokeSet, o: RasterOptions): Uint8ClampedArray {
     if (keep && o.solo) for (const b of o.solo) keep[b & 255] = 1;
     const scale = Math.max(outW, outH) / 1024;
     const acc = new Uint16Array(outW * outH * 4);
+    const aux = o.aux;
 
     // Catmull-Rom subdivision keeps big exports smooth: ~one sub-segment per 1.5 px of preview.
     const sub = Math.max(1, Math.round(scale / 1.5));
@@ -53,6 +70,7 @@ export function rasterize(set: StrokeSet, o: RasterOptions): Uint8ClampedArray {
     let ptsX = new Float32Array(256), ptsY = new Float32Array(256);
     let ptsR = new Float32Array(256), ptsG = new Float32Array(256), ptsB = new Float32Array(256);
     let ptsW = new Float32Array(256), ptsA = new Float32Array(256);
+    let ptsP = new Float32Array(256);
 
     for (let s = 0; s < set.count; s++) {
         if (keep && !keep[set.tag[s]]) continue;
@@ -65,6 +83,7 @@ export function rasterize(set: StrokeSet, o: RasterOptions): Uint8ClampedArray {
             ptsX = new Float32Array(c); ptsY = new Float32Array(c);
             ptsR = new Float32Array(c); ptsG = new Float32Array(c); ptsB = new Float32Array(c);
             ptsW = new Float32Array(c); ptsA = new Float32Array(c);
+            ptsP = new Float32Array(c);
         }
 
         // Build (sub-divided) point list in output space with per-point width.
@@ -92,6 +111,7 @@ export function rasterize(set: StrokeSet, o: RasterOptions): Uint8ClampedArray {
                 const e = (set.e[a] + (set.e[b] - set.e[a]) * t) / 255;
                 ptsW[m] = baseW * energyWidth(e, contrast);
                 ptsA[m] = energyAlpha(e, contrast);
+                if (aux) ptsP[m] = aux.vertexPhi[a] + (aux.vertexPhi[b] - aux.vertexPhi[a]) * t;
                 m++;
             }
         }
@@ -99,6 +119,7 @@ export function rasterize(set: StrokeSet, o: RasterOptions): Uint8ClampedArray {
         ptsR[m] = set.r[v1 - 1]; ptsG[m] = set.g[v1 - 1]; ptsB[m] = set.b[v1 - 1];
         ptsW[m] = baseW * energyWidth(set.e[v1 - 1] / 255, contrast);
         ptsA[m] = energyAlpha(set.e[v1 - 1] / 255, contrast);
+        if (aux) ptsP[m] = aux.vertexPhi[v1 - 1];
         m++;
 
         for (let i = 0; i < m - 1; i++) {
@@ -107,7 +128,8 @@ export function rasterize(set: StrokeSet, o: RasterOptions): Uint8ClampedArray {
                 ptsX[i], ptsY[i], ptsX[i + 1], ptsY[i + 1],
                 ptsW[i], ptsW[i + 1],
                 ptsR[i], ptsG[i], ptsB[i], ptsR[i + 1], ptsG[i + 1], ptsB[i + 1],
-                ptsA[i], ptsA[i + 1], i === 0, i === m - 2
+                ptsA[i], ptsA[i + 1], i === 0, i === m - 2,
+                aux, s, ptsP[i], ptsP[i + 1]
             );
         }
     }
@@ -139,7 +161,8 @@ function drawSegment(
     x0: number, y0: number, x1: number, y1: number,
     r0: number, r1: number,
     cr0: number, cg0: number, cb0: number, cr1: number, cg1: number, cb1: number,
-    al0: number, al1: number, first: boolean, last: boolean
+    al0: number, al1: number, first: boolean, last: boolean,
+    aux?: RasterAux, sid?: number, ph0?: number, ph1?: number
 ) {
     const dx = x1 - x0, dy = y1 - y0;
     const len2 = dx * dx + dy * dy;
@@ -175,6 +198,10 @@ function drawSegment(
             acc[k + 1] = acc[k + 1] + (cg - acc[k + 1]) * a + 0.5;
             acc[k + 2] = acc[k + 2] + (cb - acc[k + 2]) * a + 0.5;
             acc[k + 3] = acc[k + 3] + (65535 - acc[k + 3]) * a + 0.5;
+            if (aux) {
+                const q = py * W + px;
+                if (a >= aux.best[q]) { aux.best[q] = a; aux.sid[q] = sid!; aux.phi[q] = ph0! + (ph1! - ph0!) * tc; }
+            }
         }
     }
 }

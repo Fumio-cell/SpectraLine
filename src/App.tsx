@@ -41,6 +41,27 @@ export default function App() {
         }
     }, [engine]);
 
+    const handleExportVideo = useCallback(async () => {
+        const st = useAppStore.getState();
+        if (!engine || !st.input.file || st.isExporting) return;
+        const look = LOOKS.find(l => l.presetId === st.activeLookId) ?? LOOKS[0];
+        const { mode, length } = st.params.motion;
+        st.setExporting(true);
+        st.setExportProgress(0);
+        try {
+            await engine.exportMP4(
+                st.params,
+                () => `spectraline-${look.slug}-${mode}-${length}s-1080.mp4`,
+                (done, total) => useAppStore.getState().setExportProgress(done / total)
+            );
+        } catch (err: unknown) {
+            useAppStore.getState().setNotice(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+            useAppStore.getState().setExportProgress(null);
+            useAppStore.getState().setExporting(false);
+        }
+    }, [engine]);
+
     // Drop a picture anywhere.
     useEffect(() => {
         const over = (e: DragEvent) => { e.preventDefault(); setDragging(true); };
@@ -75,7 +96,7 @@ export default function App() {
                         </div>
                     </header>
                     <div className="workspace">
-                        <Controls onExport={handleExport} />
+                        <Controls onExport={handleExport} onExportVideo={handleExportVideo} />
                         <Stage onEngineReady={onEngineReady} demoLimited={demoLimited} />
                     </div>
                 </>

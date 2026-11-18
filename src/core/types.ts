@@ -35,8 +35,18 @@ export interface LineParams extends LookParams {
 
 export type ExportEdge = 1024 | 2048 | 4096;
 
+/** STILL draws the picture; EMERGE grows the lines along their flow; PULSE sends light along them (see lines/motion.ts). */
+export type MotionMode = 'still' | 'emerge' | 'pulse';
+
+export interface MotionParams {
+    mode: MotionMode;
+    /** Clip length in seconds (3..15). */
+    length: number;
+}
+
 export interface Params {
     lines: LineParams;
+    motion: MotionParams;
     export: {
         edge: ExportEdge;
     };

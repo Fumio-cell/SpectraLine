@@ -26,7 +26,8 @@ SpectraLine turns a picture into line art. Open a picture, or try one of the thr
 - **Contrast**: how strongly the picture's energy sets the brightness and width of a line (0 draws every line alike).
 - **Background**: black or transparent.
 - **Spectrum of this picture** (PRISM only): the picture's own measured spectrum, one cell per wavelength band, as tall as the band's share of the picture's light and in the band's colour. Click a band to draw only it, click more to add, "All" to draw every band.
-- **Export**: PNG at 1024, 2048 or 4096 px.
+- **Motion**: STILL (the default), EMERGE or PULSE, and a length from 3 to 15 s. EMERGE: from black, each line grows from its start along the flow, at staggered times, until the still is complete. PULSE: pulses of light travel along every line in its direction and loop without a seam. Motion runs only along the lines the still draws; a pulse travels faster where the picture's energy is stronger (120 to 420 px per second at 1024 px), and the colour of a line is the still's. Every frame is a pure function of the picture, the settings and the time. Scale, Contrast, the look and the PRISM band choice all apply. Play and Pause are above the picture.
+- **Export**: PNG at 1024, 2048 or 4096 px. With a motion chosen, MP4 as well: 1080 px on the long side, 30 fps, H.264, no sound, on black.
 
 ## About PRISM
 

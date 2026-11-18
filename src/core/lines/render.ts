@@ -1,7 +1,7 @@
 import type { LineParams } from '../types';
 import { analyse, sigmaOfScale, widthFactor, type Field } from './field';
 import { buildStrokes, type StrokeSet } from './trace';
-import { rasterize } from './raster';
+import { rasterize, type RasterOptions } from './raster';
 
 export { analyse, buildStrokes, rasterize, sigmaOfScale };
 export type { Field, StrokeSet };
@@ -23,12 +23,17 @@ export function sizeForEdge(srcW: number, srcH: number, edge: number): { w: numb
     return { w: Math.max(1, Math.round(srcW * k)), h: Math.max(1, Math.round(srcH * k)) };
 }
 
-/** Draw a stroke set at the given output size. */
-export function drawLines(field: Field, strokes: StrokeSet, p: LineParams, outW: number, outH: number): Uint8ClampedArray {
-    return rasterize(strokes, {
+/** How a stroke set is drawn at an output size; shared by the still and by motion so they can never differ. */
+export function rasterOptions(field: Field, p: LineParams, outW: number, outH: number): RasterOptions {
+    return {
         srcW: field.w, srcH: field.h, outW, outH,
         // The line width follows the reading scale, exactly as the tracer assumed.
         width: p.width * widthFactor(field.sigma), background: p.background, contrast: p.contrast,
         solo: p.mode === 'spectrum' && p.solo && p.solo.length ? p.solo : undefined
-    });
+    };
+}
+
+/** Draw a stroke set at the given output size. */
+export function drawLines(field: Field, strokes: StrokeSet, p: LineParams, outW: number, outH: number): Uint8ClampedArray {
+    return rasterize(strokes, rasterOptions(field, p, outW, outH));
 }
