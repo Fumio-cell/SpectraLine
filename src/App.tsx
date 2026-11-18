@@ -1,188 +1,100 @@
-import { useState, useCallback, useEffect } from 'react';
-import './App.css';
-import LeftPanel from './components/LeftPanel';
-import Viewer from './components/Viewer';
-import Inspector from './components/Inspector';
-import { Header } from './components/Header';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import Opening from './components/Opening';
+import Controls from './components/Controls';
+import Stage from './components/Stage';
 import { AppEngine } from './core/engine';
-import { useAppStore } from './store/useAppStore';
+import { openImage } from './core/input';
+import { useAppStore, LOOKS } from './store/useAppStore';
 import { DEMO_MODE } from './config';
 
-type ViewTab = 'Original' | 'Maps' | 'Lines' | 'Compare';
+const ACCEPT = 'image/png,image/jpeg,image/webp';
 
-function App() {
-  const [activeTab, setActiveTab] = useState<ViewTab>('Lines');
-  const [engine, setEngine] = useState<AppEngine | null>(null);
-  const [demoLimited, setDemoLimited] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  
-  const activePresetId = useAppStore(state => state.activePresetId);
-  const applyPreset = useAppStore(state => state.applyPreset);
-  const presets = useAppStore(state => state.manifest.presets);
+export default function App() {
+    const hasImage = useAppStore(s => !!s.input.file);
+    const notice = useAppStore(s => s.notice);
+    const [engine, setEngine] = useState<AppEngine | null>(null);
+    const [demoLimited, setDemoLimited] = useState(false);
+    const [dragging, setDragging] = useState(false);
+    const fileRef = useRef<HTMLInputElement>(null);
 
-  const handleEngineReady = useCallback((eng: AppEngine) => {
-    setEngine(eng);
-  }, []);
+    const onEngineReady = useCallback((e: AppEngine) => setEngine(e), []);
+    const openPicker = useCallback(() => fileRef.current?.click(), []);
 
-  useEffect(() => {
-    const handleExport = async () => {
-      if (!engine) return;
-      const state = useAppStore.getState();
-      const input = state.manifest.input;
-      const params = state.manifest.params;
-
-      if (!input.file) {
-        alert('Please import an image first.');
-        return;
-      }
-
-      try {
-        useAppStore.getState().setProcessing(true, 'Exporting lines...');
-        await engine.exportPNG(params);
-        if (DEMO_MODE) setDemoLimited(true);
-      } catch (err: unknown) {
-        alert(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
-      } finally {
-        useAppStore.getState().setProcessing(false);
-      }
+    const onPicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (fileRef.current) fileRef.current.value = '';
+        if (file) await openImage(file);
     };
 
-    const handleExportMap = async () => {
-      if (!engine) return;
-      try {
-        useAppStore.getState().setProcessing(true, 'Exporting maps...');
-        await engine.exportMapPNG();
-        if (DEMO_MODE) setDemoLimited(true);
-      } catch (err: unknown) {
-        alert(`Export map failed: ${err instanceof Error ? err.message : String(err)}`);
-      } finally {
-        useAppStore.getState().setProcessing(false);
-      }
-    };
-
-    window.addEventListener('app:export', handleExport);
-    window.addEventListener('app:exportMap', handleExportMap);
-
-    return () => {
-      window.removeEventListener('app:export', handleExport);
-      window.removeEventListener('app:exportMap', handleExportMap);
-    };
-  }, [engine]);
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-  };
-
-  const handleDrop = async (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-
-    const file = e.dataTransfer.files?.[0];
-    if (file && file.type.startsWith('image/')) {
-        if (file.size > 26214400) {
-            alert('File size exceeds 25MB limit.');
-            return;
+    const handleExport = useCallback(async () => {
+        const st = useAppStore.getState();
+        if (!engine || !st.input.file || st.isExporting) return;
+        const look = LOOKS.find(l => l.presetId === st.activeLookId) ?? LOOKS[0];
+        st.setExporting(true);
+        try {
+            await engine.exportPNG(st.params, ({ width, height }) => `spectraline-${look.slug}-${Math.max(width, height)}.png`);
+            if (DEMO_MODE) setDemoLimited(true);
+        } catch (err: unknown) {
+            useAppStore.getState().setNotice(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+            useAppStore.getState().setExporting(false);
         }
+    }, [engine]);
 
-        const img = new Image();
-        img.onload = () => {
-            if (img.width > 8192 || img.height > 8192) {
-                alert('Image dimensions exceed 8192px max edge.');
-                return;
-            }
-
-            useAppStore.getState().setInput({
-                file: file,
-                filename: file.name,
-                mimeType: file.type as 'image/jpeg' | 'image/png',
-                width: img.width,
-                height: img.height,
-                byteSize: file.size,
-                previewUrl: URL.createObjectURL(file)
-            });
+    // Drop a picture anywhere.
+    useEffect(() => {
+        const over = (e: DragEvent) => { e.preventDefault(); setDragging(true); };
+        const leave = (e: DragEvent) => { if (!e.relatedTarget) setDragging(false); };
+        const drop = (e: DragEvent) => {
+            e.preventDefault();
+            setDragging(false);
+            const file = e.dataTransfer?.files?.[0];
+            if (file) void openImage(file);
         };
-        img.src = URL.createObjectURL(file);
-    }
-  };
+        window.addEventListener('dragover', over);
+        window.addEventListener('dragleave', leave);
+        window.addEventListener('drop', drop);
+        return () => {
+            window.removeEventListener('dragover', over);
+            window.removeEventListener('dragleave', leave);
+            window.removeEventListener('drop', drop);
+        };
+    }, []);
 
-  return (
-    <div 
-        style={{ display: 'flex', flexDirection: 'column', width: '100vw', height: '100vh', overflow: 'hidden', backgroundColor: 'var(--bg-color)' }}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-    >
-      <Header />
-      {isDragging && (
-          <div style={{
-              position: 'fixed',
-              top: 0, left: 0, right: 0, bottom: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.8)',
-              zIndex: 9999,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backdropFilter: 'blur(10px)',
-              pointerEvents: 'none'
-          }}>
-              <h2 style={{ color: 'white', fontSize: '2rem', letterSpacing: '2px', fontWeight: 300 }}>
-                  Drop Image to Process
-              </h2>
-          </div>
-      )}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-      {/* Left Panel */}
-      <div style={{ width: '280px', minWidth: '280px', borderRight: '1px solid var(--panel-border)', backgroundColor: 'var(--panel-bg)', overflowY: 'auto' }}>
-        <LeftPanel />
-      </div>
+    return (
+        <div className="app">
+            <input ref={fileRef} type="file" accept={ACCEPT} hidden aria-label="Open a picture" onChange={onPicked} />
 
-      {/* Center - Viewer */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {/* Top Bar with Presets */}
-        <div style={{ height: '48px', display: 'flex', alignItems: 'center', gap: '8px', padding: '0 16px', borderBottom: '1px solid var(--panel-border)', backgroundColor: 'var(--panel-bg)', flexShrink: 0 }}>
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginRight: '8px' }}>Look:</span>
-          {presets.map(p => (
-            <button
-              key={p.presetId}
-              onClick={() => applyPreset(p.presetId)}
-              style={{
-                padding: '4px 12px',
-                borderRadius: '6px',
-                border: activePresetId === p.presetId ? '1px solid var(--accent-color)' : '1px solid var(--panel-border)',
-                backgroundColor: activePresetId === p.presetId ? 'rgba(100, 108, 255, 0.15)' : 'transparent',
-                color: activePresetId === p.presetId ? 'var(--accent-color)' : 'var(--text-main)',
-                cursor: 'pointer',
-                fontSize: '0.8rem'
-              }}
-            >
-              {p.name}
-            </button>
-          ))}
+            {hasImage ? (
+                <>
+                    <header className="signal-header app-bar">
+                        <h1 className="display">SpectraLine</h1>
+                        <div className="app-bar-actions">
+                            {DEMO_MODE && <span className="control badge">Free preview</span>}
+                            <button type="button" className="btn" onClick={openPicker}>Open another picture</button>
+                        </div>
+                    </header>
+                    <div className="workspace">
+                        <Controls onExport={handleExport} />
+                        <Stage onEngineReady={onEngineReady} demoLimited={demoLimited} />
+                    </div>
+                </>
+            ) : (
+                <>
+                    <Opening onOpenPicker={openPicker} />
+                    {notice && (
+                        <div className="notice-bar">
+                            <p className="notice" role="alert" data-tone="error">{notice}</p>
+                        </div>
+                    )}
+                </>
+            )}
+
+            {dragging && (
+                <div className="drop-veil" aria-hidden="true">
+                    <p className="display">Drop a picture to draw it</p>
+                </div>
+            )}
         </div>
-
-        {/* Viewer */}
-        <div style={{ flex: 1, overflow: 'hidden' }}>
-          <Viewer
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-            onEngineReady={handleEngineReady}
-          />
-        </div>
-      </div>
-
-      {/* Right Panel - Inspector */}
-      <div style={{ width: '320px', minWidth: '320px', borderLeft: '1px solid var(--panel-border)', backgroundColor: 'var(--panel-bg)', overflowY: 'auto' }}>
-        <Inspector demoLimited={demoLimited} />
-      </div>
-    </div>
-  </div>
-);
+    );
 }
-
-export default App;

@@ -1,6 +1,9 @@
 import type { Params } from './types';
 import type { WorkerRequest, WorkerResponse } from './worker/messageTypes';
 import { sizeForEdge, WORK_EDGE } from './lines/render';
+
+/** Long edge of the on-screen drawing. */
+export const PREVIEW_EDGE = 1024;
 import { demoWatermarkMask, downloadBlob } from './export';
 import { DEMO_MODE, DEMO_MAX_EDGE } from '../config';
 
@@ -11,29 +14,26 @@ export interface ExportResult {
 }
 
 interface PendingExport {
+    filename: string;
     resolve: (r: ExportResult) => void;
     reject: (e: Error) => void;
 }
 
 export class AppEngine {
     private worker: Worker;
-    private canvasMaps: HTMLCanvasElement;
     private canvasOut: HTMLCanvasElement;
     private sourcePromise: Promise<void> = Promise.resolve();
     private origW = 0;
     private origH = 0;
     private seq = 0;
     private linesRequestId = '';
-    private mapsRequestId = '';
     private pendingExports = new Map<string, PendingExport>();
 
-    public onMapsReady?: () => void;
     public onRenderComplete?: () => void;
     public onError?: (err: string) => void;
 
-    constructor(outCanvasId: string, mapsCanvasId?: string) {
+    constructor(outCanvasId: string) {
         this.canvasOut = document.getElementById(outCanvasId) as HTMLCanvasElement || document.createElement('canvas');
-        this.canvasMaps = (mapsCanvasId ? document.getElementById(mapsCanvasId) as HTMLCanvasElement : null) || document.createElement('canvas');
         this.worker = new Worker(new URL('./worker/processor.ts', import.meta.url), { type: 'module' });
         this.worker.onmessage = (e: MessageEvent<WorkerResponse>) => this.handle(e.data);
     }
@@ -61,7 +61,7 @@ export class AppEngine {
             this.pendingExports.delete(res.requestId);
             const blob = new Blob([res.buffer], { type: 'image/png' });
             console.log(`[Engine] Export ${res.width}x${res.height}: trace ${res.ms.trace} ms, draw ${res.ms.draw} ms, encode ${res.ms.encode} ms, ${(blob.size / 1024).toFixed(0)} KB`);
-            downloadBlob(blob, 'lines.png');
+            downloadBlob(blob, pending.filename);
             pending.resolve({ width: res.width, height: res.height, bytes: blob.size });
             return;
         }
@@ -76,16 +76,6 @@ export class AppEngine {
             console.log(`[Engine] ${res.strokeCount} lines ${res.width}x${res.height}: trace ${res.ms.trace} ms, draw ${res.ms.draw} ms`);
             if (this.onRenderComplete) this.onRenderComplete();
             return;
-        }
-
-        if (res.type === 'MAPS_READY') {
-            if (res.requestId !== this.mapsRequestId) return;
-            const { width, height, gradientMapBuffer } = res.maps;
-            this.canvasMaps.width = width;
-            this.canvasMaps.height = height;
-            const ctx = this.canvasMaps.getContext('2d')!;
-            ctx.putImageData(new ImageData(new Uint8ClampedArray(gradientMapBuffer), width, height), 0, 0);
-            if (this.onMapsReady) this.onMapsReady();
         }
     }
 
@@ -126,70 +116,24 @@ export class AppEngine {
         this.linesRequestId = id;
         this.sourcePromise.then(() => {
             if (id !== this.linesRequestId) return;
-            const { w, h } = sizeForEdge(this.origW, this.origH, params.preview.previewMaxEdge);
+            const { w, h } = sizeForEdge(this.origW, this.origH, PREVIEW_EDGE);
             this.send({ type: 'RENDER_LINES', requestId: id, lines: params.lines, outW: w, outH: h });
         });
     }
 
-    /** Build the gradient map for the Maps tab. */
-    public buildMaps(params: Params) {
-        const id = `maps_${++this.seq}`;
-        this.mapsRequestId = id;
-        this.sourcePromise.then(() => {
-            if (id !== this.mapsRequestId) return;
-            this.send({ type: 'BUILD_MAPS', requestId: id, params });
-        });
-    }
-
     /** Render at the chosen long edge in the worker and download the PNG. */
-    public async exportPNG(params: Params): Promise<ExportResult> {
+    public async exportPNG(params: Params, filename: (size: { width: number; height: number }) => string): Promise<ExportResult> {
         await this.sourcePromise;
         if (!this.origW) throw new Error('No image loaded for export.');
         const edge = DEMO_MODE ? Math.min(params.export.edge, DEMO_MAX_EDGE) : params.export.edge;
         const { w, h } = sizeForEdge(this.origW, this.origH, edge);
         const id = `png_${++this.seq}`;
         return new Promise<ExportResult>((resolve, reject) => {
-            this.pendingExports.set(id, { resolve, reject });
+            this.pendingExports.set(id, { filename: filename({ width: w, height: h }), resolve, reject });
             this.send({
                 type: 'EXPORT_PNG', requestId: id, lines: params.lines, outW: w, outH: h,
                 watermark: DEMO_MODE ? demoWatermarkMask(w, h) : undefined
             });
-        });
-    }
-
-    /** Export the gradient map visualization as a PNG file. */
-    public async exportMapPNG(): Promise<void> {
-        if (this.canvasMaps.width === 0 || this.canvasMaps.height === 0) {
-            throw new Error('No map generated yet. Please process an image first.');
-        }
-
-        let source = this.canvasMaps;
-        if (DEMO_MODE) {
-            const fit = Math.min(1, DEMO_MAX_EDGE / Math.max(source.width, source.height));
-            const demoCanvas = document.createElement('canvas');
-            demoCanvas.width = Math.floor(source.width * fit);
-            demoCanvas.height = Math.floor(source.height * fit);
-            const demoCtx = demoCanvas.getContext('2d')!;
-            demoCtx.drawImage(source, 0, 0, demoCanvas.width, demoCanvas.height);
-            const mark = demoWatermarkMask(demoCanvas.width, demoCanvas.height);
-            const img = demoCtx.getImageData(mark.x, mark.y, mark.w, mark.h);
-            for (let i = 0; i < mark.alpha.length; i++) {
-                const a = (mark.alpha[i] / 255) * 0.75;
-                for (let c = 0; c < 3; c++) img.data[i * 4 + c] = 128 * a + img.data[i * 4 + c] * (1 - a);
-            }
-            demoCtx.putImageData(img, mark.x, mark.y);
-            source = demoCanvas;
-        }
-
-        return new Promise((resolve, reject) => {
-            source.toBlob((blob) => {
-                if (!blob) {
-                    reject(new Error('Map canvas to Blob failed.'));
-                    return;
-                }
-                downloadBlob(blob, 'maps_gradient.png');
-                resolve();
-            }, 'image/png');
         });
     }
 }

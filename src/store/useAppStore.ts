@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { DEFAULT_CONTRAST } from '../core/lines/raster';
-import type { Params, ProjectManifest, Look, LookParams, ProjectInput } from '../core/types';
+import type { Params, Look, LookParams, ProjectInput } from '../core/types';
 
 /** Fixed default so a fresh session is reproducible. Random replaces it with a visible number. */
 export const DEFAULT_SEED = 1;
@@ -8,115 +8,60 @@ export const DEFAULT_SEED = 1;
 const flow: LookParams = { mode: 'flow', spacing: 2.4, length: 1, calm: 0.04, bands: 9, levels: 46, minLength: 24, width: 1.5 };
 
 const defaultParams: Params = {
-    preview: { previewMaxEdge: 1024 },
-    maps: {
-        colorQuantK: 8,
-        colorSmoothing: 0.2,
-        gradientGain: 1.5,
-        gradientThreshold: 0.05,
-        scientificMode: false
-    },
     lines: { ...flow, background: 'black', seed: DEFAULT_SEED, contrast: DEFAULT_CONTRAST },
     export: { edge: 2048 }
 };
 
-const presets: Look[] = [
-    { presetId: 'flow', name: 'FLOW', lines: flow },
-    { presetId: 'flow-bold', name: 'FLOW BOLD', lines: { ...flow, spacing: 2.6, length: 3, width: 3.4 } },
-    { presetId: 'isolines', name: 'ISOLINES', lines: { ...flow, mode: 'isolines', width: 1.2 } },
-    { presetId: 'spectrum', name: 'SPECTRUM', lines: { ...flow, mode: 'spectrum', calm: 0, width: 1.5 } }
+/**
+ * The four looks. The ids (presetId) are the ones SL-1 and SL-2 used and stay stable; only the
+ * names the person sees, and the file-name slugs, changed.
+ */
+export const LOOKS: Look[] = [
+    { presetId: 'flow', name: 'CURRENT', note: 'the flow of form', slug: 'current', lines: flow },
+    { presetId: 'flow-bold', name: 'RIPTIDE', note: 'only the strongest pull', slug: 'riptide', lines: { ...flow, spacing: 2.6, length: 3, width: 3.4 } },
+    { presetId: 'isolines', name: 'TOPO', note: 'light, mapped as terrain', slug: 'topo', lines: { ...flow, mode: 'isolines', width: 1.2 } },
+    { presetId: 'spectrum', name: 'PRISM', note: 'light, split by wavelength', slug: 'prism', lines: { ...flow, mode: 'spectrum', calm: 0, width: 1.5 } }
 ];
 
-const LOOK_FIELDS: Array<keyof LookParams> = ['mode', 'spacing', 'length', 'calm', 'bands', 'levels', 'minLength', 'width'];
-
 interface AppState {
-    manifest: ProjectManifest;
-    activePresetId: string;
-    previewQuality: 'Live' | 'High';
+    input: ProjectInput;
+    params: Params;
+    activeLookId: string;
     isProcessing: boolean;
-    processingStage: string;
-    setManifest: (update: Partial<ProjectManifest>) => void;
+    isExporting: boolean;
+    /** A message shown on the page (errors and notes), or null. */
+    notice: string | null;
     setInput: (input: Partial<ProjectInput>) => void;
-    updateParams: (section: keyof Params, update: Record<string, unknown>) => void;
-    applyPreset: (presetId: string) => void;
-    resetProject: () => void;
-    setProcessing: (isProcessing: boolean, stage?: string) => void;
-    setPreviewQuality: (quality: 'Live' | 'High') => void;
+    updateLines: (update: Partial<Params['lines']>) => void;
+    updateExport: (update: Partial<Params['export']>) => void;
+    applyLook: (lookId: string) => void;
+    setProcessing: (isProcessing: boolean) => void;
+    setExporting: (isExporting: boolean) => void;
+    setNotice: (notice: string | null) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
-    manifest: {
-        version: '1.2',
-        projectId: Math.random().toString(36).substring(2, 10),
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        input: {},
-        params: structuredClone(defaultParams),
-        presets: presets
-    },
-    activePresetId: 'flow',
-    previewQuality: 'High',
+    input: {},
+    params: structuredClone(defaultParams),
+    activeLookId: 'flow',
     isProcessing: false,
-    processingStage: '',
+    isExporting: false,
+    notice: null,
 
-    setManifest: (update) => set((state) => ({
-        manifest: { ...state.manifest, ...update, updatedAt: new Date().toISOString() }
-    })),
+    setInput: (input) => set((state) => ({ input: { ...state.input, ...input }, notice: null })),
 
-    setInput: (inputUpdate) => set((state) => ({
-        manifest: {
-            ...state.manifest,
-            input: { ...state.manifest.input, ...inputUpdate },
-            updatedAt: new Date().toISOString()
-        }
-    })),
+    updateLines: (update) => set((state) => ({ params: { ...state.params, lines: { ...state.params.lines, ...update } } })),
 
-    updateParams: (section, update) => set((state) => ({
-        manifest: {
-            ...state.manifest,
-            params: {
-                ...state.manifest.params,
-                [section]: { ...(state.manifest.params[section] as object), ...update }
-            },
-            updatedAt: new Date().toISOString()
-        },
-        // Only a change to the look itself makes it "custom"; seed, background, export do not.
-        activePresetId: section === 'lines' && LOOK_FIELDS.some(k => k in update) ? 'custom' : state.activePresetId
-    })),
+    updateExport: (update) => set((state) => ({ params: { ...state.params, export: { ...state.params.export, ...update } } })),
 
-    applyPreset: (presetId) => set((state) => {
-        const preset = presets.find(p => p.presetId === presetId);
-        if (!preset) return state;
-
-        // A look replaces the drawing settings only; seed, background and export are the user's.
-        return {
-            activePresetId: presetId,
-            manifest: {
-                ...state.manifest,
-                params: {
-                    ...state.manifest.params,
-                    lines: { ...state.manifest.params.lines, ...preset.lines }
-                },
-                updatedAt: new Date().toISOString()
-            }
-        };
+    // A look sets the drawing parameters it defines; seed, background, contrast and export size stay as chosen.
+    applyLook: (lookId) => set((state) => {
+        const look = LOOKS.find(l => l.presetId === lookId);
+        if (!look) return {};
+        return { activeLookId: lookId, params: { ...state.params, lines: { ...state.params.lines, ...look.lines } } };
     }),
 
-    resetProject: () => set(() => ({
-        activePresetId: 'flow',
-        isProcessing: false,
-        processingStage: '',
-        manifest: {
-            version: '1.2',
-            projectId: Math.random().toString(36).substring(2, 10),
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            input: {},
-            params: structuredClone(defaultParams),
-            presets: presets
-        }
-    })),
-
-    setProcessing: (isProcessing, stage = '') => set({ isProcessing, processingStage: stage }),
-    setPreviewQuality: (previewQuality) => set({ previewQuality })
+    setProcessing: (isProcessing) => set({ isProcessing }),
+    setExporting: (isExporting) => set({ isExporting }),
+    setNotice: (notice) => set({ notice })
 }));

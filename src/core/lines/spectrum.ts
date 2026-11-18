@@ -1,5 +1,5 @@
 import { blur, fieldFromTensor, percentile, structure, type Field } from './field';
-import { D65_X, D65_Y, SRGB_TO_XYZ_IEC as MX, locusXY, srgbToLinear, xyToDominant, type Dominant } from '../maps/colorscience';
+import { D65_X, D65_Y, SRGB_TO_XYZ_IEC as MX, locusXY, srgbToLinear, xyToDominant, type Dominant } from './colorscience';
 
 /**
  * SPECTRUM: the picture split into bands of dominant wavelength.

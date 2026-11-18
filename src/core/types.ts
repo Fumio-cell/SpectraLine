@@ -1,12 +1,4 @@
-export interface MapParams {
-    colorQuantK: number;
-    colorSmoothing: number;
-    gradientGain: number;
-    gradientThreshold: number;
-    scientificMode: boolean;
-}
-
-/** FLOW follows the edge-tangent field; ISOLINES traces contours of luminance. */
+/** flow = CURRENT and RIPTIDE, isolines = TOPO, spectrum = PRISM (ids stay as they were). */
 export type LineMode = 'flow' | 'isolines' | 'spectrum';
 export type Background = 'black' | 'transparent';
 
@@ -40,10 +32,6 @@ export interface LineParams extends LookParams {
 export type ExportEdge = 1024 | 2048 | 4096;
 
 export interface Params {
-    preview: {
-        previewMaxEdge: number;
-    };
-    maps: MapParams;
     lines: LineParams;
     export: {
         edge: ExportEdge;
@@ -51,36 +39,23 @@ export interface Params {
 }
 
 export interface Look {
+    /** Stable id (flow, flow-bold, isolines, spectrum); the shown name is `name`. */
     presetId: string;
     name: string;
+    /** One line under the name. */
+    note: string;
+    /** File-name part of the exported PNG. */
+    slug: string;
     lines: LookParams;
 }
 
 export interface ProjectInput {
-    assetKey?: string; // Blob/IDB key for original image
-    file?: File; // Runtime reference
+    file?: File;
     filename?: string;
-    mimeType?: 'image/jpeg' | 'image/png';
     width?: number;
     height?: number;
-    byteSize?: number;
-    previewUrl?: string; // Base64 or Object URl
-}
-
-export interface ProjectManifest {
-    version: '1.2';
-    projectId: string;
-    createdAt: string;
-    updatedAt: string;
-    input: ProjectInput;
-    params: Params;
-    presets: Look[];
-    outputs?: {
-        linesPngKey?: string;
-        maps?: {
-            gradientPngKey?: string;
-            colorPngKey?: string;
-            contoursPngKey?: string;
-        };
-    };
+    /** Object URL of the picture, for the Original view. */
+    previewUrl?: string;
+    /** True while the picture is the bundled sample (its credit is shown). */
+    isSample?: boolean;
 }

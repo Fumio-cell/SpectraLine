@@ -10,7 +10,7 @@ export function demoWatermarkMask(width: number, height: number): WatermarkMask 
     const label = 'SpectraLine (demo)';
     const c = document.createElement('canvas');
     const ctx = c.getContext('2d')!;
-    const font = `600 ${fontSize}px Inter, system-ui, sans-serif`;
+    const font = `700 ${fontSize}px Archivo, system-ui, sans-serif`;
     ctx.font = font;
     const textW = Math.ceil(ctx.measureText(label).width);
     const boxW = Math.min(width, textW + 4);

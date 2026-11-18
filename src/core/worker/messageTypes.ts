@@ -1,4 +1,4 @@
-import type { LineParams, Params } from '../types';
+import type { LineParams } from '../types';
 
 export interface WatermarkMask {
     x: number;
@@ -11,12 +11,10 @@ export interface WatermarkMask {
 
 export type WorkerRequest =
     | { type: 'SET_SOURCE'; requestId: string; buffer: ArrayBuffer; width: number; height: number }
-    | { type: 'BUILD_MAPS'; requestId: string; params: Params }
     | { type: 'RENDER_LINES'; requestId: string; lines: LineParams; outW: number; outH: number }
     | { type: 'EXPORT_PNG'; requestId: string; lines: LineParams; outW: number; outH: number; watermark?: WatermarkMask };
 
 export type WorkerResponse =
-    | { type: 'MAPS_READY'; requestId: string; status: 'ok'; maps: { width: number; height: number; gradientMapBuffer: ArrayBuffer } }
     | { type: 'LINES_READY'; requestId: string; status: 'ok'; width: number; height: number; buffer: ArrayBuffer; strokeCount: number; ms: { trace: number; draw: number } }
     | { type: 'PNG_READY'; requestId: string; status: 'ok'; buffer: ArrayBuffer; width: number; height: number; ms: { trace: number; draw: number; encode: number } }
     | { type: 'ERROR'; requestId: string; status: 'error'; error: { code: string; message: string } };
