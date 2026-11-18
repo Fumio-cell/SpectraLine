@@ -1,17 +1,24 @@
 import type { WorkerRequest, WorkerResponse, WatermarkMask } from './messageTypes';
 import type { Params } from '../types';
-import { analyse, buildStrokes, drawLines, geometryKey, type Field, type StrokeSet } from '../lines/render';
+import { analyse, buildStrokes, drawLines, geometryKey, sigmaOfScale, type Field, type StrokeSet } from '../lines/render';
+import { measureBands, spectrumCells } from '../lines/spectrum';
 import { encodePNG } from '../lines/png';
+
+/** The spectrum is always measured in 9 bands plus the purples. */
+const SPECTRUM_BANDS = 9;
 
 // Working state, kept in worker memory.
 let source: { w: number; h: number; rgba: Uint8ClampedArray } | null = null;
 let field: Field | null = null;
+let fieldSigma = 0;
 let strokeCache: { key: string; set: StrokeSet } | null = null;
 
 function getStrokes(lines: Params['lines']): { set: StrokeSet; field: Field; traceMs: number } {
     if (!source) throw new Error('No image loaded');
     const t0 = performance.now();
-    if (!field) field = analyse(source.rgba, source.w, source.h);
+    // The picture is read again only when SCALE changes.
+    const sigma = sigmaOfScale(lines.scale);
+    if (!field || fieldSigma !== sigma) { field = analyse(source.rgba, source.w, source.h, sigma); fieldSigma = sigma; strokeCache = null; }
     const key = geometryKey(lines);
     if (!strokeCache || strokeCache.key !== key) {
         strokeCache = { key, set: buildStrokes(field, lines) };
@@ -48,6 +55,12 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
             source = { w: req.width, h: req.height, rgba: new Uint8ClampedArray(req.buffer) };
             field = null;
             strokeCache = null;
+        }
+
+        else if (req.type === 'GET_SPECTRUM') {
+            if (!source) throw new Error('No image loaded');
+            const cells = spectrumCells(measureBands(source.rgba, source.w, source.h, SPECTRUM_BANDS));
+            post({ type: 'SPECTRUM_READY', requestId: req.requestId, status: 'ok', cells } as WorkerResponse);
         }
 
         else if (req.type === 'RENDER_LINES') {

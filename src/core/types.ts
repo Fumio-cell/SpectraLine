@@ -25,6 +25,10 @@ export interface LineParams extends LookParams {
     background: Background;
     /** Exponent of the energy -> brightness/width curve (0 = flat). Display only: never retraces. */
     contrast: number;
+    /** SCALE, 0 (fine) .. 1 (broad): how coarsely the picture is read (see field.ts sigmaOfScale). */
+    scale: number;
+    /** PRISM: band indexes shown; empty = every band. Display only: it never retraces. */
+    solo: number[];
     /** Same image + settings + seed always give the same pixels. */
     seed: number;
 }
@@ -56,6 +60,6 @@ export interface ProjectInput {
     height?: number;
     /** Object URL of the picture, for the Original view. */
     previewUrl?: string;
-    /** True while the picture is the bundled sample (its credit is shown). */
-    isSample?: boolean;
+    /** Set while the picture is one of the bundled samples (their credit is shown). */
+    sampleId?: 'flower' | 'portrait' | 'fluid';
 }

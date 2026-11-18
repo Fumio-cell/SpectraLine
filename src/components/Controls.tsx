@@ -1,9 +1,14 @@
 import { useAppStore, LOOKS } from '../store/useAppStore';
 import { DEMO_MODE, DEMO_MAX_EDGE } from '../config';
 import type { ExportEdge } from '../core/types';
+import type { SpectrumCell } from '../core/lines/spectrum';
 
 interface ControlsProps {
     onExport: () => void;
+}
+
+function cellName(cell: SpectrumCell): string {
+    return cell.wl === null ? 'Purples' : `${Math.round(cell.wl)} nm`;
 }
 
 export default function Controls({ onExport }: ControlsProps) {
@@ -11,11 +16,16 @@ export default function Controls({ onExport }: ControlsProps) {
     const exportEdge = useAppStore(s => s.params.export.edge);
     const activeLookId = useAppStore(s => s.activeLookId);
     const isExporting = useAppStore(s => s.isExporting);
+    const spectrum = useAppStore(s => s.spectrum);
     const applyLook = useAppStore(s => s.applyLook);
     const updateLines = useAppStore(s => s.updateLines);
     const updateExport = useAppStore(s => s.updateExport);
+    const toggleBand = useAppStore(s => s.toggleBand);
+    const clearSolo = useAppStore(s => s.clearSolo);
 
     const isPrism = lines.mode === 'spectrum';
+    const solo = lines.solo;
+    const tallest = spectrum ? Math.max(...spectrum.map(c => c.share), 1e-9) : 1;
 
     return (
         <aside className="controls" aria-label="Controls">
@@ -42,44 +52,28 @@ export default function Controls({ onExport }: ControlsProps) {
 
                 <div className="field-group">
                     <div className="field-head">
+                        <label className="field-label" htmlFor="scale">Scale</label>
+                        <span className="field-value" id="scale-note">Fine to broad</span>
+                    </div>
+                    <input
+                        id="scale" type="range" min="0" max="1" step="0.01"
+                        value={lines.scale}
+                        aria-describedby="scale-note"
+                        aria-valuetext={lines.scale < 0.34 ? 'fine' : lines.scale > 0.66 ? 'broad' : 'medium'}
+                        onChange={e => updateLines({ scale: parseFloat(e.target.value) })}
+                    />
+                </div>
+
+                <div className="field-group">
+                    <div className="field-head">
                         <label className="field-label" htmlFor="contrast">Contrast</label>
                         <span className="field-value">{lines.contrast.toFixed(2)}</span>
                     </div>
                     <input
                         id="contrast" type="range" min="0" max="2" step="0.05"
                         value={lines.contrast}
-                        aria-describedby="contrast-note"
                         onChange={e => updateLines({ contrast: parseFloat(e.target.value) })}
                     />
-                    <p className="note" id="contrast-note">Higher: strong places glow, calm fade.</p>
-                </div>
-
-                {isPrism && (
-                    <div className="field-group">
-                        <div className="field-head">
-                            <label className="field-label" htmlFor="bands">Bands</label>
-                            <span className="field-value">{lines.bands} + purples</span>
-                        </div>
-                        <input
-                            id="bands" type="range" min="3" max="12" step="1"
-                            value={lines.bands}
-                            onChange={e => updateLines({ bands: parseInt(e.target.value) })}
-                        />
-                    </div>
-                )}
-
-                <div className="field-group">
-                    <label className="field-label" htmlFor="seed">Seed</label>
-                    <div className="field-row">
-                        <input
-                            id="seed" type="number" className="field" min="0" step="1"
-                            value={lines.seed}
-                            aria-describedby="seed-note"
-                            onChange={e => updateLines({ seed: (parseInt(e.target.value) || 0) >>> 0 })}
-                        />
-                        <button type="button" className="btn" onClick={() => updateLines({ seed: Math.floor(Math.random() * 999999) + 1 })}>Random</button>
-                    </div>
-                    <p className="note" id="seed-note">Where lines start. TOPO ignores it.</p>
                 </div>
 
                 <div className="field-group">
@@ -98,6 +92,44 @@ export default function Controls({ onExport }: ControlsProps) {
                     )}
                 </div>
             </section>
+
+            {isPrism && (
+                <section className="section" aria-labelledby="spectrum-title">
+                    <div className="field-head">
+                        <h2 className="section-title" id="spectrum-title">Spectrum of this picture</h2>
+                        <button type="button" className="btn btn-small" aria-pressed={solo.length === 0} onClick={clearSolo}>All</button>
+                    </div>
+                    <div className="strip" role="group" aria-labelledby="spectrum-title">
+                        {spectrum
+                            ? spectrum.map((cell, k) => {
+                                const picked = solo.includes(k);
+                                const dim = solo.length > 0 && !picked;
+                                return (
+                                    <button
+                                        key={k}
+                                        type="button"
+                                        className="strip-cell"
+                                        aria-pressed={picked}
+                                        aria-label={`${cellName(cell)}, ${(cell.share * 100).toFixed(1)}% of the picture's light`}
+                                        title={`${cellName(cell)}: ${(cell.share * 100).toFixed(1)}%`}
+                                        onClick={() => toggleBand(k)}
+                                    >
+                                        <span
+                                            className="strip-bar"
+                                            style={{
+                                                height: `${Math.max(4, (cell.share / tallest) * 100)}%`,
+                                                background: `rgb(${cell.colour[0]} ${cell.colour[1]} ${cell.colour[2]})`,
+                                                opacity: dim ? 0.35 : 1
+                                            }}
+                                        />
+                                    </button>
+                                );
+                            })
+                            : <p className="note">Measuring…</p>}
+                    </div>
+                    <p className="note">430 nm to 630 nm, then purples.</p>
+                </section>
+            )}
 
             <section className="section" aria-labelledby="export-title">
                 <h2 className="section-title" id="export-title">Export</h2>

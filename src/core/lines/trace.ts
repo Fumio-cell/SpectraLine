@@ -1,6 +1,6 @@
 import type { LineParams } from '../types';
-import { energyOf, isoMaps, type Field } from './field';
-import { buildBands, tintColour } from './spectrum';
+import { energyOf, isoMaps, lengthFactor, widthFactor, SIGMA_REFERENCE, type Field } from './field';
+import { buildBands, measureBands, tintColour } from './spectrum';
 
 /**
  * A set of polylines in working-image coordinates (pixel i covers [i, i+1)).
@@ -179,6 +179,15 @@ function sampleField(f: Field, x: number, y: number, rx: number, ry: number) {
 }
 
 /**
+ * The look's width and length, carried to the reading scale of the field: broader reading gives
+ * wider and longer lines (the spacing is in line widths, so it follows). The raster uses the same
+ * width factor, so what is traced and what is drawn agree.
+ */
+function atScale(p: LineParams, f: Field): LineParams {
+    return { ...p, width: p.width * widthFactor(f.sigma), length: p.length * lengthFactor(f.sigma) };
+}
+
+/**
  * Occupancy grid shared by all the lines of one picture. Lines keep a minimum separation: a cell
  * belongs to one line only, a walk stops on reaching another line's cell, and a seed in an
  * occupied cell is refused. This is what keeps strokes reading as lines instead of a solid fill.
@@ -206,6 +215,8 @@ function flowPass(f: Field, p: LineParams, g: Grid, rng: () => number, out: Buil
     const stopE = 0.02 + 0.07 * (1 - calm);
     const step = 1.5 * f.s;
     const budget = Math.round(56 * Math.max(0.2, p.length));
+    const member = f.member;
+    const mw = f.memberW ?? f.w;
     const cohMin = COHERENCE_MIN;
 
     const maxSteps = budget + 2;
@@ -234,6 +245,8 @@ function flowPass(f: Field, p: LineParams, g: Grid, rng: () => number, out: Buil
             // same sample then starts the next step.
             sampleField(f, x, y, dx, dy);
             if (sm.en < stopE || sm.coh < cohMin || sm.agree < AGREE_MIN) break;
+            // SPECTRUM: a band's line lives only where the picture's light belongs to the band.
+            if (member && !member[Math.floor(Math.fround(y * scale)) * mw + Math.floor(Math.fround(x * scale))]) break;
             const o = g.owner[cellOf(g, x * scale, y * scale)];
             if (o >= 0 && o !== id) break;
             xs[n] = x; ys[n] = y; n++;
@@ -246,6 +259,7 @@ function flowPass(f: Field, p: LineParams, g: Grid, rng: () => number, out: Buil
         const rx = rng(), ry = rng(), ra = rng();
         const x0 = rx * f.w, y0 = ry * f.h;
         if (g.owner[cellOf(g, x0 * scale, y0 * scale)] !== -1) continue;
+        if (member && !member[Math.min(g.h - 1, Math.floor(Math.fround(y0 * scale))) * mw + Math.min(g.w - 1, Math.floor(Math.fround(x0 * scale)))]) continue;
         // Orient the corner tangents towards the nearest pixel's own tangent, so the seed direction
         // is consistent with the field it sits in (an arbitrary reference could flip corners).
         const ni = Math.min(f.h - 1, Math.floor(y0)) * f.w + Math.min(f.w - 1, Math.floor(x0));
@@ -259,7 +273,8 @@ function flowPass(f: Field, p: LineParams, g: Grid, rng: () => number, out: Buil
         const nf = walk(x0, y0, tx0, ty0, fxs, fys);
         const nb = walk(x0, y0, -tx0, -ty0, bxs, bys);
         const nPts = nf + nb + 1;
-        const minPts = Math.max(6, Math.round(14 * p.length));
+        // A band's line lives only on its own pixels, so its runs are naturally shorter: allow shorter ones.
+        const minPts = Math.max(6, Math.round(14 * p.length * (member ? 0.6 : 1)));
         // A seed that cannot make a line is not tried again: its cell is marked unavailable.
         if (nPts < minPts * 0.6) { markDead(x0, y0); continue; }
 
@@ -305,7 +320,8 @@ function attemptsFor(g: Grid): number {
     return Math.min(1500000, Math.round(5 * g.gw * g.gh));
 }
 
-export function traceFlow(f: Field, p: LineParams): StrokeSet {
+export function traceFlow(f: Field, p0: LineParams): StrokeSet {
+    const p = atScale(p0, f);
     const out = new Builder();
     const g = makeGrid(f.w, f.h, p);
     flowPass(f, p, g, makeRng(p.seed), out, 0, attemptsFor(g));
@@ -315,11 +331,12 @@ export function traceFlow(f: Field, p: LineParams): StrokeSet {
 /** Number of passes the SPECTRUM bands take turns in, so no band claims all the space first. */
 const SPECTRUM_ROUNDS = 4;
 
-export function traceSpectrum(f: Field, p: LineParams): StrokeSet {
+export function traceSpectrum(f: Field, p0: LineParams): StrokeSet {
+    const p = atScale(p0, f);
     const out = new Builder();
     if (!f.rgba) return out.finish();
     const n = Math.max(2, Math.min(16, Math.round(p.bands)));
-    if (!f.spec || f.spec.n !== n) f.spec = buildBands(f.rgba, f.w, f.h, n);
+    if (!f.spec || f.spec.n !== n) f.spec = buildBands(measureBands(f.rgba, f.w, f.h, n), f.sigma);
     const bands = f.spec.bands;
     const g = makeGrid(f.w, f.h, p);
     const rng = makeRng(p.seed);
@@ -363,7 +380,8 @@ export function traceIsolines(f: Field, p: LineParams): StrokeSet {
     const touched: number[] = [];
 
     const levels = Math.max(2, Math.round(p.levels));
-    const minLen = Math.max(2, p.minLength) * s;
+    // Contours read at a broader scale have to be longer to count: the floor follows the smoothing.
+    const minLen = Math.max(2, p.minLength) * s * Math.sqrt(Math.max(1, f.sigma / SIGMA_REFERENCE));
 
     // Edge id -> intersection point for the current level.
     let level = 0;

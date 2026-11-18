@@ -1,4 +1,4 @@
-import { blur, fieldFromTensor, percentile, structure, type Field } from './field';
+import { blur, fieldFromTensor, percentile, planesOf, structure, type Field } from './field';
 import { D65_X, D65_Y, SRGB_TO_XYZ_IEC as MX, locusXY, srgbToLinear, xyToDominant, type Dominant } from './colorscience';
 
 /**
@@ -28,7 +28,7 @@ const BAND_SCALE_P = 0.94;
 const EMPTY_BAND = 0.002;
 
 /** Stand-in field for a skipped band; it never carries a line (its mass is 0). */
-const EMPTY_FIELD = { w: 1, h: 1, s: 1, lum: new Float32Array(0), cr: new Float32Array(0), cg: new Float32Array(0), cb: new Float32Array(0), tx: new Float32Array(1), ty: new Float32Array(1), coh: new Float32Array(1), str: new Float32Array(1), en: new Float32Array(1) } as Field;
+const EMPTY_FIELD = { w: 1, h: 1, s: 1, sigma: 3, lum: new Float32Array(0), cr: new Float32Array(0), cg: new Float32Array(0), cb: new Float32Array(0), tx: new Float32Array(1), ty: new Float32Array(1), coh: new Float32Array(1), str: new Float32Array(1), en: new Float32Array(1) } as Field;
 
 /** Resolution factor of the band analysis (weights are summed 2x2; tensors are smooth anyway). */
 const BAND_DOWN = 2;
@@ -156,16 +156,66 @@ export interface BandSet {
     bands: Band[];
 }
 
-/** Build weight maps and structure fields for n spectral bands (+ purple). */
-export function buildBands(rgba: Uint8ClampedArray, w: number, h: number, nBands: number, spec?: SpectrumMaps): BandSet {
+/**
+ * What the picture measures per band, independent of SCALE (so it is computed once per picture):
+ * the weight maps (purity x luminance, summed 2x2 to 512 px), the luminance maps, which pixels belong
+ * to each band, the band hues and their colour tables, and the totals the spectrum strip shows.
+ */
+export interface BandMeasure {
+    n: number;
+    bw: number;
+    bh: number;
+    maps: Float32Array[];
+    lum: Float32Array[];
+    /** 1 on every pixel (at the picture's own resolution, mw x mh) whose dominant wavelength belongs to the band. */
+    member: Uint8Array[];
+    mw: number;
+    /** Sum of the weight (purity x luminance) of every band, and of luminance alone. */
+    sums: number[];
+    lsums: number[];
+    /** Hue of each band as an xy chromaticity on the locus (or the line of purples), and its colour table. */
+    hue: [number, number][];
+    lut: Float32Array[];
+    meanPurity: number[];
+    centre: (number | null)[];
+    active: boolean[];
+    total: number;
+}
+
+const measureCache = new WeakMap<Uint8ClampedArray, Map<number, BandMeasure>>();
+
+/** Measure the picture's spectrum: n spectral bands (violet to red) plus one for the purples. */
+export function measureBands(rgba: Uint8ClampedArray, w: number, h: number, nBands: number): BandMeasure {
     const n = Math.max(2, Math.min(16, Math.round(nBands)));
-    const sp = spec ?? spectrumOf(rgba, w, h);
+    const byN = measureCache.get(rgba) ?? new Map<number, BandMeasure>();
+    const hit = byN.get(n);
+    if (hit) return hit;
+
+    const sp = spectrumOf(rgba, w, h);
+    // Which band a point belongs to is read from the lightly blurred colour (the colour a line carries at
+    // that point), not from a single pixel, so grain does not flip the band every other pixel.
+    const pl = planesOf(rgba, w, h);
+    const soft = new Uint8ClampedArray(w * h * 4);
+    for (let i = 0; i < w * h; i++) { soft[i * 4] = pl.cr[i]; soft[i * 4 + 1] = pl.cg[i]; soft[i * 4 + 2] = pl.cb[i]; soft[i * 4 + 3] = 255; }
+    const spSoft = spectrumOf(soft, w, h);
     const bw = Math.ceil(w / BAND_DOWN), bh = Math.ceil(h / BAND_DOWN);
-    // maps: purity x luminance (the band's weight). lum: luminance alone, for the mean purity.
     const maps: Float32Array[] = [];
     const lum: Float32Array[] = [];
-    for (let k = 0; k <= n; k++) { maps.push(new Float32Array(bw * bh)); lum.push(new Float32Array(bw * bh)); }
+    const member: Uint8Array[] = [];
+    for (let k = 0; k <= n; k++) { maps.push(new Float32Array(bw * bh)); lum.push(new Float32Array(bw * bh)); member.push(new Uint8Array(w * h)); }
     const span = BAND_HI - BAND_LO;
+    const markMember = (wl: number, wgt: number, i: number) => {
+        if (wgt <= 0) return;
+        if (wl < 0) member[n][i] = 1;
+        else if (wl > 0) {
+            let u = ((wl - BAND_LO) / span) * (n - 1);
+            if (u < 0) u = 0; else if (u > n - 1) u = n - 1;
+            const k = Math.min(n - 2, Math.floor(u));
+            const f = u - k;
+            if (f < 1) member[k][i] = 1;
+            if (f > 0) member[k + 1][i] = 1;
+        }
+    };
     // Weighted mean chromaticity of purple pixels, for the hue of the purple band.
     let pw = 0, px = 0, py = 0;
 
@@ -173,6 +223,7 @@ export function buildBands(rgba: Uint8ClampedArray, w: number, h: number, nBands
         const by = Math.min(bh - 1, (y / BAND_DOWN) | 0);
         for (let x = 0; x < w; x++) {
             const i = y * w + x;
+            markMember(spSoft.wl[i], spSoft.purity[i] * spSoft.Y[i], i);
             const wgt = sp.purity[i] * sp.Y[i];
             if (wgt <= 0) continue;
             const bi = by * bw + Math.min(bw - 1, (x / BAND_DOWN) | 0);
@@ -195,52 +246,83 @@ export function buildBands(rgba: Uint8ClampedArray, w: number, h: number, nBands
     for (const m of maps) for (let i = 0; i < m.length; i++) m[i] *= norm;
     for (const m of lum) for (let i = 0; i < m.length; i++) m[i] *= norm;
 
-    const s = Math.max(bw, bh) / 1024;
-    // A band that holds next to nothing of the picture has no lines to trace: skip its analysis.
     const sums = maps.map(m => { let t = 0; for (let i = 0; i < m.length; i++) t += m[i]; return t; });
     const lsums = lum.map(m => { let t = 0; for (let i = 0; i < m.length; i++) t += m[i]; return t; });
     const total = sums.reduce((a, b) => a + b, 0);
-    const active = sums.map(t => t > EMPTY_BAND * total);
-    const tensors = maps.map((m, k) => (active[k] ? structure(m, bw, bh, s) : null));
+    const centres = bandCentres(n);
+    const hue: [number, number][] = [];
+    const lut: Float32Array[] = [];
+    const meanPurity: number[] = [];
+    const centre: (number | null)[] = [];
+    for (let k = 0; k <= n; k++) {
+        let hx: number, hy: number;
+        if (k < n) { const xy = locusXY(centres[k]); hx = xy[0]; hy = xy[1]; centre.push(centres[k]); }
+        else { centre.push(null); [hx, hy] = pw > 0 ? purplePoint(px / pw, py / pw) : [0.45, 0.2]; }
+        hue.push([hx, hy]);
+        lut.push(tintLut(hx, hy));
+        meanPurity.push(lsums[k] > 0 ? Math.min(1, sums[k] / lsums[k]) : 0);
+    }
+    const m: BandMeasure = { n, bw, bh, maps, lum, member, mw: w, sums, lsums, hue, lut, meanPurity, centre, active: sums.map(t => t > EMPTY_BAND * total), total };
+    byN.set(n, m);
+    measureCache.set(rgba, byN);
+    return m;
+}
+
+/** Read every band's weight map at a reading scale (sigma, px at 1024) and give it its colour table and membership. */
+export function buildBands(m: BandMeasure, sigma: number): BandSet {
+    const { n, bw, bh } = m;
+    const s = Math.max(bw, bh) / 1024;
+    // A band that holds next to nothing of the picture has no lines to trace: skip its analysis.
+    const tensors = m.maps.map((map, k) => (m.active[k] ? structure(map, bw, bh, s, sigma) : null));
     // One normaliser for all bands (percentile of the strongest band at each pixel), so a band
     // that hardly exists in the picture stays faint instead of being stretched to full strength.
     const maxE = new Float32Array(bw * bh);
     for (const t of tensors) if (t) for (let i = 0; i < maxE.length; i++) if (t.energy[i] > maxE[i]) maxE[i] = t.energy[i];
     const scale = percentile(maxE, BAND_SCALE_P);
 
-    const centres = bandCentres(n);
     const bands: Band[] = [];
     for (let k = 0; k <= n; k++) {
-        // Hue of the band: its centre wavelength; the purple band points at the mean purple direction.
-        let hx: number, hy: number, wlc: number | null = null;
-        if (k < n) {
-            wlc = centres[k];
-            const xy = locusXY(wlc); hx = xy[0]; hy = xy[1];
-        } else if (pw > 0) {
-            [hx, hy] = purplePoint(px / pw, py / pw);
-        } else { hx = 0.45; hy = 0.2; }
-
-        const meanPurity = lsums[k] > 0 ? Math.min(1, sums[k] / lsums[k]) : 0;
         const tk = tensors[k];
         let field: Field = EMPTY_FIELD;
         let mass = 0;
         if (tk) {
             // Purity measured at each point: luminance-weighted mean purity of the band's light,
             // smoothed at the scale the structure is measured at. weight / luminance = purity.
-            const lumSm = blur(lum[k], bw, bh, 3 * s);
+            const lumSm = blur(m.lum[k], bw, bh, sigma * s);
             const purity = new Float32Array(bw * bh);
             let peak = 0;
             for (let i = 0; i < purity.length; i++) if (lumSm[i] > peak) peak = lumSm[i];
             const floor = 0.01 * peak;
+            const fb = m.meanPurity[k];
             for (let i = 0; i < purity.length; i++) {
-                purity[i] = lumSm[i] > floor ? Math.min(1, tk.smooth[i] / lumSm[i]) : meanPurity;
+                purity[i] = lumSm[i] > floor ? Math.min(1, tk.smooth[i] / lumSm[i]) : fb;
             }
-            field = fieldFromTensor(tk, bw, bh, s, scale, { tint: { lut: tintLut(hx, hy), purity } });
+            field = fieldFromTensor(tk, bw, bh, s, sigma, scale, { tint: { lut: m.lut[k], purity }, member: m.member[k], memberW: m.mw });
             for (let i = 0; i < field.en.length; i++) mass += field.en[i];
         }
-        bands.push({ wl: wlc, meanPurity, mass, field });
+        bands.push({ wl: m.centre[k], meanPurity: m.meanPurity[k], mass, field });
     }
     return { n, bands };
+}
+
+/** One cell of the spectrum strip: a band, its share of the picture's weight, its colour at the measured purity. */
+export interface SpectrumCell {
+    /** Centre wavelength in nm, or null for the purples. */
+    wl: number | null;
+    /** Share of the picture's total weight (purity x luminance), 0..1. */
+    share: number;
+    /** The band's colour at its measured mean purity, 0..255. */
+    colour: [number, number, number];
+}
+
+export function spectrumCells(m: BandMeasure): SpectrumCell[] {
+    const cells: SpectrumCell[] = [];
+    const c = [0, 0, 0];
+    for (let k = 0; k <= m.n; k++) {
+        tintColour(m.lut[k], m.meanPurity[k], c);
+        cells.push({ wl: m.centre[k], share: m.total > 0 ? m.sums[k] / m.total : 0, colour: [Math.round(c[0]), Math.round(c[1]), Math.round(c[2])] });
+    }
+    return cells;
 }
 
 /** Point on the line of purples in the direction of (x, y) from the white point. */

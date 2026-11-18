@@ -1,9 +1,9 @@
 import type { LineParams } from '../types';
-import { analyse, type Field } from './field';
+import { analyse, sigmaOfScale, widthFactor, type Field } from './field';
 import { buildStrokes, type StrokeSet } from './trace';
 import { rasterize } from './raster';
 
-export { analyse, buildStrokes, rasterize };
+export { analyse, buildStrokes, rasterize, sigmaOfScale };
 export type { Field, StrokeSet };
 
 /** Long edge, in px, at which the picture is analysed and lines are traced. */
@@ -13,8 +13,8 @@ export const WORK_EDGE = 1024;
 export function geometryKey(p: LineParams): string {
     // ISOLINES are deterministic contours: the seed does not enter, so it never forces a retrace.
     return p.mode === 'isolines'
-        ? JSON.stringify([p.mode, p.levels, p.minLength])
-        : JSON.stringify([p.mode, p.spacing, p.width, p.length, p.calm, p.seed, p.mode === 'spectrum' ? p.bands : 0]);
+        ? JSON.stringify([p.mode, p.levels, p.minLength, p.scale])
+        : JSON.stringify([p.mode, p.spacing, p.width, p.length, p.calm, p.seed, p.scale, p.mode === 'spectrum' ? p.bands : 0]);
 }
 
 /** Pixel size for a picture of the given proportions at a chosen long edge. */
@@ -27,6 +27,8 @@ export function sizeForEdge(srcW: number, srcH: number, edge: number): { w: numb
 export function drawLines(field: Field, strokes: StrokeSet, p: LineParams, outW: number, outH: number): Uint8ClampedArray {
     return rasterize(strokes, {
         srcW: field.w, srcH: field.h, outW, outH,
-        width: p.width, background: p.background, contrast: p.contrast
+        // The line width follows the reading scale, exactly as the tracer assumed.
+        width: p.width * widthFactor(field.sigma), background: p.background, contrast: p.contrast,
+        solo: p.mode === 'spectrum' && p.solo && p.solo.length ? p.solo : undefined
     });
 }

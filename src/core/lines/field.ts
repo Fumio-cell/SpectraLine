@@ -11,6 +11,8 @@ export interface Field {
     h: number;
     /** Scale of this analysis relative to the 1024 px reference. */
     s: number;
+    /** Reading scale, as the sigma (px at 1024) of the gradient blur; the tensor is read at twice this. */
+    sigma: number;
     /** Luminance 0..1. */
     lum: Float32Array;
     /** Blurred source colour, planar, 0..255. */
@@ -34,12 +36,43 @@ export interface Field {
      * point, instead of sampling the picture's RGB.
      */
     tint?: Tint;
+    /** SPECTRUM band fields: 1 on each pixel whose dominant wavelength belongs to the band (lines live only there). */
+    member?: Uint8Array;
+    /** Width of `member`: it is kept at the picture's own resolution, not the band field's. */
+    memberW?: number;
     /** The analysed picture (SPECTRUM reads it) and the band set built from it, cached by band count. */
     rgba?: Uint8ClampedArray;
     spec?: import('./spectrum').BandSet;
     /** Lazily built maps for ISOLINES. */
     iso?: { fine: Float32Array; weight: Float32Array; slope: Float32Array };
 }
+
+
+/*
+ * SCALE: the one variable that sets how coarsely the picture is read. The gradient is taken from the
+ * picture blurred at sigma, the structure tensor is integrated at twice that. Line width, length and the
+ * contour smoothing follow from it, so the drawing stays balanced at every position.
+ * Nothing is added at any scale: every line is still read from the picture, only coarser or finer.
+ */
+export const SIGMA_FINE = 1.0;
+export const SIGMA_BROAD = 20;
+/** The sigma that SL-1..SL-3 read the field at; widths and lengths of the looks are tuned for it. */
+export const SIGMA_REFERENCE = 3;
+
+/** SCALE shown when a picture is opened (see the SL-4 evidence). */
+export const DEFAULT_SCALE = 0.7;
+
+/** SCALE position 0 (fine) .. 1 (broad) -> sigma in px at 1024, continuous and logarithmic. */
+export function sigmaOfScale(u: number): number {
+    const t = Math.min(1, Math.max(0, u));
+    return SIGMA_FINE * Math.pow(SIGMA_BROAD / SIGMA_FINE, t);
+}
+
+/** Line width grows with the reading scale: 1 + sigma/4 (relative to the reference). */
+export const widthFactor = (sigma: number) => (1 + sigma / 4) / (1 + SIGMA_REFERENCE / 4);
+
+/** Lines get longer as the field is read more broadly (more steps along the tangent). */
+export const lengthFactor = (sigma: number) => Math.pow(sigma / SIGMA_REFERENCE, 0.8);
 
 /** Coherence gate: grain (low coherence) is not energy even when its gradient is large. */
 export function energyOf(str: number, coh: number): number {
@@ -60,8 +93,8 @@ export function gaussianKernel(sigma: number): Float32Array {
     return k;
 }
 
-/** Separable Gaussian blur with clamped borders. */
-export function blur(src: Float32Array, w: number, h: number, sigma: number): Float32Array {
+/** Exact separable Gaussian blur with clamped borders (small sigma). */
+function gaussBlur(src: Float32Array, w: number, h: number, sigma: number): Float32Array {
     const k = gaussianKernel(sigma);
     const r = (k.length - 1) >> 1;
     const tmp = new Float32Array(w * h);
@@ -103,6 +136,65 @@ export function blur(src: Float32Array, w: number, h: number, sigma: number): Fl
     return out;
 }
 
+
+/** One horizontal box pass of radius r with clamped borders, O(1) per pixel. */
+function boxH(src: Float32Array, dst: Float32Array, w: number, h: number, r: number) {
+    const inv = 1 / (2 * r + 1);
+    for (let y = 0; y < h; y++) {
+        const row = y * w;
+        let acc = 0;
+        for (let j = -r; j <= r; j++) acc += src[row + (j < 0 ? 0 : j >= w ? w - 1 : j)];
+        dst[row] = acc * inv;
+        for (let x = 1; x < w; x++) {
+            const a = x + r, b = x - r - 1;
+            acc += src[row + (a >= w ? w - 1 : a)] - src[row + (b < 0 ? 0 : b)];
+            dst[row + x] = acc * inv;
+        }
+    }
+}
+
+/** One vertical box pass, running sums kept per column so memory is read row by row. */
+function boxV(src: Float32Array, dst: Float32Array, w: number, h: number, r: number) {
+    const inv = 1 / (2 * r + 1);
+    const acc = new Float64Array(w);
+    for (let j = -r; j <= r; j++) {
+        const row = (j < 0 ? 0 : j >= h ? h - 1 : j) * w;
+        for (let x = 0; x < w; x++) acc[x] += src[row + x];
+    }
+    for (let x = 0; x < w; x++) dst[x] = acc[x] * inv;
+    for (let y = 1; y < h; y++) {
+        const a = (y + r >= h ? h - 1 : y + r) * w, b = (y - r - 1 < 0 ? 0 : y - r - 1) * w, o = y * w;
+        for (let x = 0; x < w; x++) {
+            acc[x] += src[a + x] - src[b + x];
+            dst[o + x] = acc[x] * inv;
+        }
+    }
+}
+
+/**
+ * Gaussian blur. Small sigma uses the exact kernel; larger sigma uses three box passes whose widths
+ * give the same variance (error under 3%), which costs the same at every sigma. That is what makes a
+ * continuous SCALE affordable: the broad end would otherwise need kernels over 190 taps wide.
+ */
+export function blur(src: Float32Array, w: number, h: number, sigma: number): Float32Array {
+    if (sigma < 2.5) return gaussBlur(src, w, h, sigma);
+    const n = 3;
+    const ideal = Math.sqrt((12 * sigma * sigma) / n + 1);
+    let wl = Math.floor(ideal); if (wl % 2 === 0) wl--;
+    const wu = wl + 2;
+    const m = Math.round((12 * sigma * sigma - n * wl * wl - 4 * n * wl - 3 * n) / (-4 * wl - 4));
+    let a = src;
+    const t1 = new Float32Array(w * h);
+    const t2 = new Float32Array(w * h);
+    for (let i = 0; i < n; i++) {
+        const r = ((i < m ? wl : wu) - 1) >> 1;
+        boxH(a, t1, w, h, r);
+        boxV(t1, t2, w, h, r);
+        a = t2;
+    }
+    return t2;
+}
+
 export function percentile(values: Float32Array, p: number): number {
     let max = 0;
     for (let i = 0; i < values.length; i++) if (values[i] > max) max = values[i];
@@ -130,7 +222,7 @@ export interface Tint {
 }
 
 export interface Tensor {
-    /** The map blurred at 3*s (the gradient is taken from it). */
+    /** The map blurred at the gradient sigma (the gradient is taken from it). */
     smooth: Float32Array;
     tx: Float32Array; ty: Float32Array; coh: Float32Array;
     /** sqrt(trace of the structure tensor): raw gradient energy, unnormalised. */
@@ -138,12 +230,13 @@ export interface Tensor {
 }
 
 /**
- * Structure tensor of a scalar map: gradient of the map blurred at 3*s, tensor blurred at 6*s.
- * The tangent is the dominant gradient direction + 90 degrees, computed algebraically.
+ * Structure tensor of a scalar map: gradient of the map blurred at sigma*s, tensor blurred at twice
+ * that (s = analysis size / 1024). The tangent is the dominant gradient direction + 90 degrees,
+ * computed algebraically.
  */
-export function structure(map: Float32Array, w: number, h: number, s: number): Tensor {
+export function structure(map: Float32Array, w: number, h: number, s: number, sigma = SIGMA_REFERENCE): Tensor {
     const n = w * h;
-    const gl = blur(map, w, h, 3 * s);
+    const gl = blur(map, w, h, sigma * s);
     const gxx = new Float32Array(n);
     const gyy = new Float32Array(n);
     const gxy = new Float32Array(n);
@@ -159,9 +252,9 @@ export function structure(map: Float32Array, w: number, h: number, s: number): T
             gxy[i] = gx * gy;
         }
     }
-    const jxx = blur(gxx, w, h, 6 * s);
-    const jyy = blur(gyy, w, h, 6 * s);
-    const jxy = blur(gxy, w, h, 6 * s);
+    const jxx = blur(gxx, w, h, 2 * sigma * s);
+    const jyy = blur(gyy, w, h, 2 * sigma * s);
+    const jxy = blur(gxy, w, h, 2 * sigma * s);
 
     const tx = new Float32Array(n);
     const ty = new Float32Array(n);
@@ -192,7 +285,7 @@ export function energyScale(energy: Float32Array): number {
 }
 
 /** Build a Field from a tensor and a normaliser (shared between bands so they stay comparable). */
-export function fieldFromTensor(t: Tensor, w: number, h: number, s: number, scale: number, base: Partial<Field>): Field {
+export function fieldFromTensor(t: Tensor, w: number, h: number, s: number, sigma: number, scale: number, base: Partial<Field>): Field {
     const n = w * h;
     const str = new Float32Array(n);
     const en = new Float32Array(n);
@@ -203,14 +296,19 @@ export function fieldFromTensor(t: Tensor, w: number, h: number, s: number, scal
     const none = new Float32Array(0);
     return {
         lum: none, cr: none, cg: none, cb: none, ...base,
-        w, h, s, tx: t.tx, ty: t.ty, coh: t.coh, str, en
+        w, h, s, sigma, tx: t.tx, ty: t.ty, coh: t.coh, str, en
     } as Field;
 }
 
-export function analyse(rgba: Uint8ClampedArray, w: number, h: number): Field {
+interface Planes { lum: Float32Array; cr: Float32Array; cg: Float32Array; cb: Float32Array }
+const planeCache = new WeakMap<Uint8ClampedArray, Planes>();
+
+/** Luminance and the lightly blurred colour the lines carry; independent of SCALE, so cached per picture. */
+export function planesOf(rgba: Uint8ClampedArray, w: number, h: number): Planes {
+    const hit = planeCache.get(rgba);
+    if (hit) return hit;
     const n = w * h;
     const s = Math.max(w, h) / 1024;
-
     const lum = new Float32Array(n);
     const r = new Float32Array(n);
     const g = new Float32Array(n);
@@ -220,24 +318,29 @@ export function analyse(rgba: Uint8ClampedArray, w: number, h: number): Field {
         r[i] = R; g[i] = G; b[i] = B;
         lum[i] = (0.299 * R + 0.587 * G + 0.114 * B) / 255;
     }
-
-    // Colour that the lines will carry: the source, lightly blurred.
     const cs = Math.max(0.6, 1.5 * s);
-    const cr = blur(r, w, h, cs);
-    const cg = blur(g, w, h, cs);
-    const cb = blur(b, w, h, cs);
+    const planes = { lum, cr: blur(r, w, h, cs), cg: blur(g, w, h, cs), cb: blur(b, w, h, cs) };
+    planeCache.set(rgba, planes);
+    return planes;
+}
 
-    const t = structure(lum, w, h, s);
-    return fieldFromTensor(t, w, h, s, energyScale(t.energy), { lum, cr, cg, cb, rgba });
+/** Read the picture's field at a reading scale (sigma in px at 1024; see sigmaOfScale). */
+export function analyse(rgba: Uint8ClampedArray, w: number, h: number, sigma = SIGMA_REFERENCE): Field {
+    const s = Math.max(w, h) / 1024;
+    const { lum, cr, cg, cb } = planesOf(rgba, w, h);
+    const t = structure(lum, w, h, s, sigma);
+    return fieldFromTensor(t, w, h, s, sigma, energyScale(t.energy), { lum, cr, cg, cb, rgba });
 }
 
 /** Luminance maps used by ISOLINES, built on first use. */
 export function isoMaps(field: Field): { fine: Float32Array; weight: Float32Array; slope: Float32Array } {
     if (field.iso) return field.iso;
     const { w, h, s, lum, str } = field;
-    const fine = blur(lum, w, h, 2.2 * s);
-    const coarse = blur(lum, w, h, 7 * s);
-    const weight = blur(str, w, h, 5 * s);
+    // TOPO reads the luminance at the same SCALE: the contours are cut from a map smoothed in proportion.
+    const k = field.sigma / SIGMA_REFERENCE;
+    const fine = blur(lum, w, h, 2.2 * k * s);
+    const coarse = blur(lum, w, h, 7 * k * s);
+    const weight = blur(str, w, h, 5 * k * s);
     // Where the picture has structure keep the fine map; where it is flat, fall
     // back to the heavily smoothed one so noise does not turn into contour dust.
     const mixed = new Float32Array(w * h);
@@ -258,7 +361,7 @@ export function isoMaps(field: Field): { fine: Float32Array; weight: Float32Arra
             grad[y * w + x] = Math.sqrt(gx * gx + gy * gy);
         }
     }
-    const sl = blur(grad, w, h, 2 * s);
+    const sl = blur(grad, w, h, 2 * k * s);
     const p = percentile(sl, 0.98);
     const slope = new Float32Array(w * h);
     for (let i = 0; i < slope.length; i++) slope[i] = Math.min(1, sl[i] / p);

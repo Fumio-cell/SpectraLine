@@ -1,5 +1,6 @@
 import type { Params } from './types';
 import type { WorkerRequest, WorkerResponse } from './worker/messageTypes';
+import type { SpectrumCell } from './lines/spectrum';
 import { sizeForEdge, WORK_EDGE } from './lines/render';
 
 /** Long edge of the on-screen drawing. */
@@ -27,9 +28,11 @@ export class AppEngine {
     private origH = 0;
     private seq = 0;
     private linesRequestId = '';
+    private spectrumRequestId = '';
     private pendingExports = new Map<string, PendingExport>();
 
     public onRenderComplete?: () => void;
+    public onSpectrum?: (cells: SpectrumCell[]) => void;
     public onError?: (err: string) => void;
 
     constructor(outCanvasId: string) {
@@ -63,6 +66,11 @@ export class AppEngine {
             console.log(`[Engine] Export ${res.width}x${res.height}: trace ${res.ms.trace} ms, draw ${res.ms.draw} ms, encode ${res.ms.encode} ms, ${(blob.size / 1024).toFixed(0)} KB`);
             downloadBlob(blob, pending.filename);
             pending.resolve({ width: res.width, height: res.height, bytes: blob.size });
+            return;
+        }
+
+        if (res.type === 'SPECTRUM_READY') {
+            if (res.requestId === this.spectrumRequestId && this.onSpectrum) this.onSpectrum(res.cells);
             return;
         }
 
@@ -118,6 +126,16 @@ export class AppEngine {
             if (id !== this.linesRequestId) return;
             const { w, h } = sizeForEdge(this.origW, this.origH, PREVIEW_EDGE);
             this.send({ type: 'RENDER_LINES', requestId: id, lines: params.lines, outW: w, outH: h });
+        });
+    }
+
+    /** Ask for the picture's measured spectrum (queued behind any drawing). */
+    public requestSpectrum() {
+        const id = `spectrum_${++this.seq}`;
+        this.spectrumRequestId = id;
+        this.sourcePromise.then(() => {
+            if (id !== this.spectrumRequestId) return;
+            this.send({ type: 'GET_SPECTRUM', requestId: id });
         });
     }
 

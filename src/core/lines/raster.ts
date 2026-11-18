@@ -34,12 +34,16 @@ export interface RasterOptions {
     background: Background;
     /** Exponent of the energy curve (see energyCurve); default DEFAULT_CONTRAST. */
     contrast?: number;
+    /** SPECTRUM: draw only the strokes of these bands. */
+    solo?: number[];
 }
 
 export function rasterize(set: StrokeSet, o: RasterOptions): Uint8ClampedArray {
     const { outW, outH } = o;
     const kx = outW / o.srcW, ky = outH / o.srcH;
     const contrast = o.contrast ?? DEFAULT_CONTRAST;
+    const keep = o.solo ? new Uint8Array(256) : null;
+    if (keep && o.solo) for (const b of o.solo) keep[b & 255] = 1;
     const scale = Math.max(outW, outH) / 1024;
     const acc = new Uint16Array(outW * outH * 4);
 
@@ -51,6 +55,7 @@ export function rasterize(set: StrokeSet, o: RasterOptions): Uint8ClampedArray {
     let ptsW = new Float32Array(256), ptsA = new Float32Array(256);
 
     for (let s = 0; s < set.count; s++) {
+        if (keep && !keep[set.tag[s]]) continue;
         const v0 = set.start[s], v1 = set.start[s + 1];
         const n = v1 - v0;
         if (n < 2) continue;

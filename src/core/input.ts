@@ -1,18 +1,22 @@
 import { useAppStore } from '../store/useAppStore';
 
-/** The one bundled picture. Credited the way Image-Flow credits its samples. */
-export const SAMPLE = {
-    path: 'sample/sample-4.webp',
-    filename: 'sample-4.webp',
-    credit: 'Sample image by Miho Morita.',
-    alt: 'A painted pink flower with gold petals'
-};
+/** The credit line for the bundled pictures, as Image-Flow credits them. */
+export const SAMPLE_CREDIT = 'Sample image by Miho Morita.';
+
+/** Three bundled pictures of different character. */
+export const SAMPLES = [
+    { id: 'flower', name: 'Flower', file: 'sample-4.webp', alt: 'A painted pink flower with gold petals' },
+    { id: 'portrait', name: 'Portrait', file: 'sample-5.webp', alt: 'A pale painted portrait of a face with red lips' },
+    { id: 'fluid', name: 'Fluid', file: 'sample-3.webp', alt: 'Swirling blue, cyan and orange fluid on a dark ground' }
+] as const;
+
+export type SampleId = typeof SAMPLES[number]['id'];
 
 const MAX_BYTES = 25 * 1024 * 1024;
 const MAX_EDGE = 8192;
 
 /** Check a picture and make it the current one. Problems become a message on the page. */
-export async function openImage(file: File, isSample = false): Promise<void> {
+export async function openImage(file: File, sampleId?: SampleId): Promise<void> {
     const { setInput, setNotice } = useAppStore.getState();
     if (!file.type.startsWith('image/')) {
         setNotice('That file is not a picture. Open a PNG, JPEG or WebP.');
@@ -41,17 +45,18 @@ export async function openImage(file: File, isSample = false): Promise<void> {
     }
     const previous = useAppStore.getState().input.previewUrl;
     if (previous) URL.revokeObjectURL(previous);
-    setInput({ file, filename: file.name, width: size.w, height: size.h, previewUrl: url, isSample });
+    setInput({ file, filename: file.name, width: size.w, height: size.h, previewUrl: url, sampleId });
 }
 
-/** Load the bundled sample from this site (no other host is involved). */
-export async function loadSample(): Promise<void> {
+/** Load a bundled sample from this site (no other host is involved). */
+export async function loadSample(id: SampleId = 'flower'): Promise<void> {
     const { setNotice } = useAppStore.getState();
+    const sample = SAMPLES.find(x => x.id === id) ?? SAMPLES[0];
     try {
-        const res = await fetch(`${import.meta.env.BASE_URL}${SAMPLE.path}`);
+        const res = await fetch(`${import.meta.env.BASE_URL}sample/${sample.file}`);
         if (!res.ok) throw new Error(String(res.status));
         const blob = await res.blob();
-        await openImage(new File([blob], SAMPLE.filename, { type: blob.type || 'image/webp' }), true);
+        await openImage(new File([blob], sample.file, { type: blob.type || 'image/webp' }), sample.id);
     } catch {
         setNotice('The sample could not be loaded.');
     }

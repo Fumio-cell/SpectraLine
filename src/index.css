@@ -77,6 +77,26 @@ a { color: var(--paper); text-underline-offset: 3px; }
 .field-row .field { flex: 1; min-width: 0; }
 
 .btn-wide { width: 100%; }
+.btn-small { padding: var(--space-1) var(--space-2); }
+.btn-small[aria-pressed='true'] { border-color: var(--paper); color: var(--acid); }
+.field-ends { display: flex; justify-content: space-between; }
+
+/* The spectrum strip: one cell per band, its bar as tall as the band's share of the picture's light. */
+.strip { display: flex; gap: 2px; height: 44px; align-items: stretch; }
+.strip-cell {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: flex-end;
+    padding: 0;
+    background: var(--ink-panel);
+    border: var(--rule-hair) solid var(--line-control);
+    border-radius: var(--radius-none);
+    cursor: pointer;
+}
+.strip-cell:hover { border-color: var(--paper-dim); }
+.strip-cell[aria-pressed='true'] { border-color: var(--paper); }
+.strip-bar { display: block; width: 100%; }
 .btn-fill:disabled, .btn-fill[aria-disabled='true'] { cursor: progress; }
 .btn[aria-disabled='true'] { color: var(--paper-label); cursor: progress; }
 
@@ -129,14 +149,17 @@ a { color: var(--paper); text-underline-offset: 3px; }
     min-width: 0;
     min-height: 0;
     padding: var(--space-5);
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-content: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
     gap: var(--space-4);
 }
-.opening-stage figure { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
-.opening-stage img { display: block; width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; }
-.opening-credit { grid-column: 1 / -1; }
+.samples { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
+.sample { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.sample img { display: block; width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; }
+.sample-pick { display: block; padding: 0; background: none; border: var(--rule-hair) solid var(--line-control); border-radius: var(--radius-none); cursor: pointer; }
+.sample-pick:hover { border-color: var(--paper); }
+.sample-name { color: var(--paper-dim); }
 
 @media (max-width: 1000px) {
     .opening { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }

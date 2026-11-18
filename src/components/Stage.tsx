@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore, LOOKS } from '../store/useAppStore';
 import { AppEngine } from '../core/engine';
-import { SAMPLE } from '../core/input';
+import { SAMPLES, SAMPLE_CREDIT } from '../core/input';
 import { DEMO_MODE, DEMO_MAX_EDGE, BUY_URL } from '../config';
 
 type View = 'drawing' | 'original' | 'compare';
 
 const VIEWS: { id: View; label: string }[] = [
-    { id: 'drawing', label: 'Drawing' },
     { id: 'original', label: 'Original' },
+    { id: 'drawing', label: 'Drawing' },
     { id: 'compare', label: 'Side by side' }
 ];
 
@@ -25,7 +25,9 @@ export default function Stage({ onEngineReady, demoLimited }: StageProps) {
     const activeLookId = useAppStore(s => s.activeLookId);
     const isProcessing = useAppStore(s => s.isProcessing);
     const notice = useAppStore(s => s.notice);
+    const spectrum = useAppStore(s => s.spectrum);
     const setProcessing = useAppStore(s => s.setProcessing);
+    const setSpectrum = useAppStore(s => s.setSpectrum);
 
     const engineRef = useRef<AppEngine | null>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -41,6 +43,14 @@ export default function Stage({ onEngineReady, demoLimited }: StageProps) {
             onEngineReady(engineRef.current);
         }
     }, [onEngineReady]);
+
+    // PRISM shows the picture's own spectrum: ask for it once per picture, queued behind the drawing.
+    useEffect(() => {
+        const engine = engineRef.current;
+        if (!engine || !input.file || activeLookId !== 'spectrum' || spectrum) return;
+        engine.onSpectrum = (cells) => setSpectrum(cells);
+        engine.requestSpectrum();
+    }, [input.file, activeLookId, spectrum, setSpectrum]);
 
     // One debounced entry point for everything that needs (re)drawing.
     useEffect(() => {
@@ -73,7 +83,8 @@ export default function Stage({ onEngineReady, demoLimited }: StageProps) {
     const showOriginal = view !== 'drawing';
     const showDrawing = view !== 'original';
     const drawingLabel = `${look.name}: your picture drawn by SpectraLine`;
-    const originalAlt = input.isSample ? SAMPLE.alt : `Your picture${input.filename ? `, ${input.filename}` : ''}`;
+    const sample = SAMPLES.find(x => x.id === input.sampleId);
+    const originalAlt = sample ? sample.alt : `Your picture${input.filename ? `, ${input.filename}` : ''}`;
 
     return (
         <main className="stage" id="main">
@@ -127,7 +138,7 @@ export default function Stage({ onEngineReady, demoLimited }: StageProps) {
                         Demo export: {DEMO_MAX_EDGE} px with a watermark. <a href={BUY_URL} target="_blank" rel="noopener noreferrer">Get the full version</a>
                     </p>
                 )}
-                {input.isSample && <p className="note">{SAMPLE.credit}</p>}
+                {sample && <p className="note">{SAMPLE_CREDIT}</p>}
             </div>
         </main>
     );

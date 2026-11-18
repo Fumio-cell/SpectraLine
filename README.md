@@ -6,9 +6,9 @@
 **どんな絵にも、流れとスペクトルがある。**
 **SpectraLine はそれを描く。何も足さない。**
 
-SpectraLine turns a picture into line art. Open a picture and it is drawn in your browser: no upload, no account. You can export the result as a PNG, on black or on a transparent background, at up to 4096 px.
+SpectraLine turns a picture into line art. Open a picture, or try one of the three samples, and it is drawn in your browser: no upload, no account. You can export the result as a PNG, on black or on a transparent background, at up to 4096 px.
 
-"Nothing added" is a rule, not a slogan. Every property of every line is measured from the picture: its direction, its colour, its brightness and its width. The seed decides only where lines start. The same picture, look and settings always give the same pixels.
+"Nothing added" is a rule, not a slogan. Every property of every line is measured from the picture: its direction, its colour, its brightness and its width. The same picture, look and settings always give the same pixels.
 
 ## The four looks
 
@@ -21,7 +21,12 @@ SpectraLine turns a picture into line art. Open a picture and it is drawn in you
 
 ## Controls
 
-Look, Contrast (how strongly the picture's energy sets brightness and width; 0 draws every line alike), Bands (PRISM only), Seed with Random, Background (black or transparent), Export size and Export.
+- **Look**: CURRENT, RIPTIDE, TOPO or PRISM.
+- **Scale**: from fine to broad. It sets how coarsely the picture is read. Fine gives a nervous grain that follows every brushstroke; broad gives long sweeps across the whole picture. Line width, length and spacing follow it. Nothing is added at any scale: every line is still read from the picture.
+- **Contrast**: how strongly the picture's energy sets the brightness and width of a line (0 draws every line alike).
+- **Background**: black or transparent.
+- **Spectrum of this picture** (PRISM only): the picture's own measured spectrum, one cell per wavelength band, as tall as the band's share of the picture's light and in the band's colour. Click a band to draw only it, click more to add, "All" to draw every band.
+- **Export**: PNG at 1024, 2048 or 4096 px.
 
 ## About PRISM
 

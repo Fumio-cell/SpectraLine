@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { DEFAULT_CONTRAST } from '../core/lines/raster';
+import { DEFAULT_SCALE } from '../core/lines/field';
 import type { Params, Look, LookParams, ProjectInput } from '../core/types';
+import type { SpectrumCell } from '../core/lines/spectrum';
 
 /** Fixed default so a fresh session is reproducible. Random replaces it with a visible number. */
 export const DEFAULT_SEED = 1;
@@ -8,7 +10,7 @@ export const DEFAULT_SEED = 1;
 const flow: LookParams = { mode: 'flow', spacing: 2.4, length: 1, calm: 0.04, bands: 9, levels: 46, minLength: 24, width: 1.5 };
 
 const defaultParams: Params = {
-    lines: { ...flow, background: 'black', seed: DEFAULT_SEED, contrast: DEFAULT_CONTRAST },
+    lines: { ...flow, background: 'black', seed: DEFAULT_SEED, contrast: DEFAULT_CONTRAST, scale: DEFAULT_SCALE, solo: [] },
     export: { edge: 2048 }
 };
 
@@ -18,9 +20,9 @@ const defaultParams: Params = {
  */
 export const LOOKS: Look[] = [
     { presetId: 'flow', name: 'CURRENT', note: 'the flow of form', slug: 'current', lines: flow },
-    { presetId: 'flow-bold', name: 'RIPTIDE', note: 'only the strongest pull', slug: 'riptide', lines: { ...flow, spacing: 2.6, length: 3, width: 3.4 } },
+    { presetId: 'flow-bold', name: 'RIPTIDE', note: 'only the strongest pull', slug: 'riptide', lines: { ...flow, spacing: 2.3, length: 3, width: 3.4 } },
     { presetId: 'isolines', name: 'TOPO', note: 'light, mapped as terrain', slug: 'topo', lines: { ...flow, mode: 'isolines', width: 1.2 } },
-    { presetId: 'spectrum', name: 'PRISM', note: 'light, split by wavelength', slug: 'prism', lines: { ...flow, mode: 'spectrum', calm: 0, width: 1.5 } }
+    { presetId: 'spectrum', name: 'PRISM', note: 'light, split by wavelength', slug: 'prism', lines: { ...flow, mode: 'spectrum', spacing: 2.2, calm: 0, width: 1.5 } }
 ];
 
 interface AppState {
@@ -31,6 +33,8 @@ interface AppState {
     isExporting: boolean;
     /** A message shown on the page (errors and notes), or null. */
     notice: string | null;
+    /** PRISM: the picture's own measured spectrum (one cell per band), once the worker has it. */
+    spectrum: SpectrumCell[] | null;
     setInput: (input: Partial<ProjectInput>) => void;
     updateLines: (update: Partial<Params['lines']>) => void;
     updateExport: (update: Partial<Params['export']>) => void;
@@ -38,6 +42,9 @@ interface AppState {
     setProcessing: (isProcessing: boolean) => void;
     setExporting: (isExporting: boolean) => void;
     setNotice: (notice: string | null) => void;
+    setSpectrum: (cells: SpectrumCell[] | null) => void;
+    toggleBand: (band: number) => void;
+    clearSolo: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -47,8 +54,15 @@ export const useAppStore = create<AppState>((set) => ({
     isProcessing: false,
     isExporting: false,
     notice: null,
+    spectrum: null,
 
-    setInput: (input) => set((state) => ({ input: { ...state.input, ...input }, notice: null })),
+    // A new picture clears the notice, the measured spectrum and any soloed bands.
+    setInput: (input) => set((state) => ({
+        input: { ...state.input, ...input },
+        notice: null,
+        spectrum: null,
+        params: { ...state.params, lines: { ...state.params.lines, solo: [] } }
+    })),
 
     updateLines: (update) => set((state) => ({ params: { ...state.params, lines: { ...state.params.lines, ...update } } })),
 
@@ -63,5 +77,14 @@ export const useAppStore = create<AppState>((set) => ({
 
     setProcessing: (isProcessing) => set({ isProcessing }),
     setExporting: (isExporting) => set({ isExporting }),
-    setNotice: (notice) => set({ notice })
+    setNotice: (notice) => set({ notice }),
+    setSpectrum: (spectrum) => set({ spectrum }),
+
+    // Click a band to draw only it; click more to add; click a shown one to take it out; none = every band.
+    toggleBand: (band) => set((state) => {
+        const cur = state.params.lines.solo;
+        const next = cur.length === 0 ? [band] : cur.includes(band) ? cur.filter(b => b !== band) : [...cur, band].sort((a, b) => a - b);
+        return { params: { ...state.params, lines: { ...state.params.lines, solo: next } } };
+    }),
+    clearSolo: () => set((state) => ({ params: { ...state.params, lines: { ...state.params.lines, solo: [] } } }))
 }));

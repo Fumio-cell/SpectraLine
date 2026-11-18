@@ -1,9 +1,9 @@
 import { LOOKS } from '../store/useAppStore';
-import { SAMPLE, loadSample } from '../core/input';
+import { SAMPLES, SAMPLE_CREDIT, loadSample } from '../core/input';
 
 /**
- * The first screen: says what the tool does without a file. The two pictures are shipped with the
- * tool: the sample, and the PRISM drawing SpectraLine made from it.
+ * The first screen: says what the tool does without a file. It shows the three bundled pictures,
+ * each beside the PRISM drawing SpectraLine made from it, so the range is visible before anything loads.
  */
 export default function Opening({ onOpenPicker }: { onOpenPicker: () => void }) {
     const base = import.meta.env.BASE_URL;
@@ -15,9 +15,9 @@ export default function Opening({ onOpenPicker }: { onOpenPicker: () => void }) 
                     Every picture holds a current and a spectrum.<br />
                     SpectraLine draws them. Nothing added.
                 </p>
-                <p className="note">Open a picture, or try the sample. It is drawn in your browser; nothing is uploaded.</p>
+                <p className="note">Open a picture, or try a sample. It is drawn in your browser; nothing is uploaded.</p>
                 <div className="opening-actions">
-                    <button type="button" className="btn-fill" onClick={() => { void loadSample(); }}>Try a sample</button>
+                    <button type="button" className="btn-fill" onClick={() => { void loadSample('flower'); }}>Try a sample</button>
                     <button type="button" className="btn" onClick={onOpenPicker}>Open a picture</button>
                 </div>
                 <ul className="looklist" aria-label="The four looks">
@@ -29,16 +29,19 @@ export default function Opening({ onOpenPicker }: { onOpenPicker: () => void }) 
                     ))}
                 </ul>
             </section>
-            <section className="opening-stage" aria-label="Example">
-                <figure>
-                    <img src={`${base}sample/example-original.webp`} alt={SAMPLE.alt} width={800} height={800} decoding="async" />
-                    <figcaption className="note">The picture</figcaption>
-                </figure>
-                <figure>
-                    <img src={`${base}sample/example-prism.webp`} alt="The same picture drawn as lines in the colours of its light" width={800} height={800} decoding="async" />
-                    <figcaption className="note">PRISM</figcaption>
-                </figure>
-                <p className="note opening-credit">{SAMPLE.credit}</p>
+            <section className="opening-stage" aria-label="Samples">
+                <ul className="samples">
+                    {SAMPLES.map(sample => (
+                        <li key={sample.id} className="sample">
+                            <button type="button" className="sample-pick" aria-label={`Try the ${sample.name} sample`} onClick={() => { void loadSample(sample.id); }}>
+                                <img src={`${base}sample/example-${sample.id}-original.webp`} alt={sample.alt} width={600} height={600} decoding="async" />
+                            </button>
+                            <img src={`${base}sample/example-${sample.id}-prism.webp`} alt={`The ${sample.name} sample drawn by PRISM`} width={600} height={600} decoding="async" />
+                            <span className="control sample-name">{sample.name}</span>
+                        </li>
+                    ))}
+                </ul>
+                <p className="note">{SAMPLE_CREDIT}</p>
             </section>
         </main>
     );
