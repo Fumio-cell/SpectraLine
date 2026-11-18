@@ -14,7 +14,7 @@ export function geometryKey(p: LineParams): string {
     // ISOLINES are deterministic contours: the seed does not enter, so it never forces a retrace.
     return p.mode === 'isolines'
         ? JSON.stringify([p.mode, p.levels, p.minLength])
-        : JSON.stringify([p.mode, p.spacing, p.width, p.length, p.calm, p.seed]);
+        : JSON.stringify([p.mode, p.spacing, p.width, p.length, p.calm, p.seed, p.mode === 'spectrum' ? p.bands : 0]);
 }
 
 /** Pixel size for a picture of the given proportions at a chosen long edge. */

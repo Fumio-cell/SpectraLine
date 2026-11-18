@@ -24,8 +24,24 @@ export interface Field {
     coh: Float32Array;
     /** Structure strength 0..1 (RMS gradient energy, normalised to its 98th percentile). */
     str: Float32Array;
+    /**
+     * Energy 0..1: strength gated by coherence. This is the one number that decides how
+     * bright and how wide a FLOW line is at a point; it is a pure function of the picture.
+     */
+    en: Float32Array;
+    /** SPECTRUM band fields draw in one measured colour instead of sampling the picture. */
+    fixed?: [number, number, number];
+    /** The analysed picture (SPECTRUM reads it) and the band set built from it, cached by band count. */
+    rgba?: Uint8ClampedArray;
+    spec?: import('./spectrum').BandSet;
     /** Lazily built maps for ISOLINES. */
-    iso?: { fine: Float32Array; weight: Float32Array };
+    iso?: { fine: Float32Array; weight: Float32Array; slope: Float32Array };
+}
+
+/** Coherence gate: grain (low coherence) is not energy even when its gradient is large. */
+export function energyOf(str: number, coh: number): number {
+    const t = Math.min(1, Math.max(0, (coh - 0.10) / 0.60));
+    return str * (0.2 + 0.8 * t * t * (3 - 2 * t));
 }
 
 export function gaussianKernel(sigma: number): Float32Array {
@@ -84,7 +100,7 @@ export function blur(src: Float32Array, w: number, h: number, sigma: number): Fl
     return out;
 }
 
-function percentile(values: Float32Array, p: number): number {
+export function percentile(values: Float32Array, p: number): number {
     let max = 0;
     for (let i = 0; i < values.length; i++) if (values[i] > max) max = values[i];
     if (max <= 0) return 1e-6;
@@ -102,28 +118,19 @@ function percentile(values: Float32Array, p: number): number {
     return max;
 }
 
-export function analyse(rgba: Uint8ClampedArray, w: number, h: number): Field {
+export interface Tensor {
+    tx: Float32Array; ty: Float32Array; coh: Float32Array;
+    /** sqrt(trace of the structure tensor): raw gradient energy, unnormalised. */
+    energy: Float32Array;
+}
+
+/**
+ * Structure tensor of a scalar map: gradient of the map blurred at 3*s, tensor blurred at 6*s.
+ * The tangent is the dominant gradient direction + 90 degrees, computed algebraically.
+ */
+export function structure(map: Float32Array, w: number, h: number, s: number): Tensor {
     const n = w * h;
-    const s = Math.max(w, h) / 1024;
-
-    const lum = new Float32Array(n);
-    const r = new Float32Array(n);
-    const g = new Float32Array(n);
-    const b = new Float32Array(n);
-    for (let i = 0; i < n; i++) {
-        const R = rgba[i * 4], G = rgba[i * 4 + 1], B = rgba[i * 4 + 2];
-        r[i] = R; g[i] = G; b[i] = B;
-        lum[i] = (0.299 * R + 0.587 * G + 0.114 * B) / 255;
-    }
-
-    // Colour that the lines will carry: the source, lightly blurred.
-    const cs = Math.max(0.6, 1.5 * s);
-    const cr = blur(r, w, h, cs);
-    const cg = blur(g, w, h, cs);
-    const cb = blur(b, w, h, cs);
-
-    // Gradient of the smoothed luminance.
-    const gl = blur(lum, w, h, 3 * s);
+    const gl = blur(map, w, h, 3 * s);
     const gxx = new Float32Array(n);
     const gyy = new Float32Array(n);
     const gxy = new Float32Array(n);
@@ -139,8 +146,6 @@ export function analyse(rgba: Uint8ClampedArray, w: number, h: number): Field {
             gxy[i] = gx * gy;
         }
     }
-
-    // Structure tensor, integrated over a neighbourhood.
     const jxx = blur(gxx, w, h, 6 * s);
     const jyy = blur(gyy, w, h, 6 * s);
     const jxy = blur(gxy, w, h, 6 * s);
@@ -163,16 +168,58 @@ export function analyse(rgba: Uint8ClampedArray, w: number, h: number): Field {
         tx[i] = -sg2;
         ty[i] = cg2;
     }
+    return { tx, ty, coh, energy };
+}
 
-    const p98 = percentile(energy, 0.98);
+/** Gradient energy is normalised to 0..1 at this percentile of the picture: the top few percent saturate. */
+export const ENERGY_PERCENTILE = Number(0.92);
+
+export function energyScale(energy: Float32Array): number {
+    return percentile(energy, ENERGY_PERCENTILE);
+}
+
+/** Build a Field from a tensor and a normaliser (shared between bands so they stay comparable). */
+export function fieldFromTensor(t: Tensor, w: number, h: number, s: number, scale: number, base: Partial<Field>): Field {
+    const n = w * h;
     const str = new Float32Array(n);
-    for (let i = 0; i < n; i++) str[i] = Math.min(1, energy[i] / p98);
+    const en = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+        str[i] = Math.min(1, t.energy[i] / scale);
+        en[i] = energyOf(str[i], t.coh[i]);
+    }
+    const none = new Float32Array(0);
+    return {
+        lum: none, cr: none, cg: none, cb: none, ...base,
+        w, h, s, tx: t.tx, ty: t.ty, coh: t.coh, str, en
+    } as Field;
+}
 
-    return { w, h, s, lum, cr, cg, cb, tx, ty, coh, str };
+export function analyse(rgba: Uint8ClampedArray, w: number, h: number): Field {
+    const n = w * h;
+    const s = Math.max(w, h) / 1024;
+
+    const lum = new Float32Array(n);
+    const r = new Float32Array(n);
+    const g = new Float32Array(n);
+    const b = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+        const R = rgba[i * 4], G = rgba[i * 4 + 1], B = rgba[i * 4 + 2];
+        r[i] = R; g[i] = G; b[i] = B;
+        lum[i] = (0.299 * R + 0.587 * G + 0.114 * B) / 255;
+    }
+
+    // Colour that the lines will carry: the source, lightly blurred.
+    const cs = Math.max(0.6, 1.5 * s);
+    const cr = blur(r, w, h, cs);
+    const cg = blur(g, w, h, cs);
+    const cb = blur(b, w, h, cs);
+
+    const t = structure(lum, w, h, s);
+    return fieldFromTensor(t, w, h, s, energyScale(t.energy), { lum, cr, cg, cb, rgba });
 }
 
 /** Luminance maps used by ISOLINES, built on first use. */
-export function isoMaps(field: Field): { fine: Float32Array; weight: Float32Array } {
+export function isoMaps(field: Field): { fine: Float32Array; weight: Float32Array; slope: Float32Array } {
     if (field.iso) return field.iso;
     const { w, h, s, lum, str } = field;
     const fine = blur(lum, w, h, 2.2 * s);
@@ -186,6 +233,22 @@ export function isoMaps(field: Field): { fine: Float32Array; weight: Float32Arra
         const k = t * t * (3 - 2 * t);
         mixed[i] = coarse[i] + (fine[i] - coarse[i]) * k;
     }
-    field.iso = { fine: mixed, weight };
+
+    // Luminance slope of the map the contours are cut from: the energy of ISOLINES.
+    const grad = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) {
+        const ym = y > 0 ? y - 1 : 0, yp = y < h - 1 ? y + 1 : h - 1;
+        for (let x = 0; x < w; x++) {
+            const xm = x > 0 ? x - 1 : 0, xp = x < w - 1 ? x + 1 : w - 1;
+            const gx = (mixed[y * w + xp] - mixed[y * w + xm]) * 0.5;
+            const gy = (mixed[yp * w + x] - mixed[ym * w + x]) * 0.5;
+            grad[y * w + x] = Math.sqrt(gx * gx + gy * gy);
+        }
+    }
+    const sl = blur(grad, w, h, 2 * s);
+    const p = percentile(sl, 0.98);
+    const slope = new Float32Array(w * h);
+    for (let i = 0; i < slope.length; i++) slope[i] = Math.min(1, sl[i] / p);
+    field.iso = { fine: mixed, weight, slope };
     return field.iso;
 }

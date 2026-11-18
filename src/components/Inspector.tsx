@@ -30,7 +30,8 @@ const Inspector = ({ demoLimited = false }: { demoLimited?: boolean }) => {
     const handleLinesChange = (field: string, value: unknown) => updateParams('lines', { [field]: value });
     const handleMapsChange = (field: string, value: unknown) => updateParams('maps', { [field]: value });
     const handleExportChange = (field: string, value: unknown) => updateParams('export', { [field]: value });
-    const isFlow = params.lines.mode === 'flow';
+    const isFlow = params.lines.mode !== 'isolines';
+    const isSpectrum = params.lines.mode === 'spectrum';
 
 
 
@@ -125,6 +126,7 @@ const Inspector = ({ demoLimited = false }: { demoLimited?: boolean }) => {
                     >
                         <option value="flow">Flow (follows edges)</option>
                         <option value="isolines">Isolines (luminance contours)</option>
+                        <option value="spectrum">Spectrum (bands of wavelength)</option>
                     </select>
                 </div>
 
@@ -139,6 +141,17 @@ const Inspector = ({ demoLimited = false }: { demoLimited?: boolean }) => {
                                 className="slider-input"
                             />
                         </div>
+                        {isSpectrum && (
+                            <div className="control-group">
+                                <label className="control-header">Bands <span>{params.lines.bands} + purples</span></label>
+                                <input
+                                    type="range" min="3" max="12" step="1"
+                                    value={params.lines.bands}
+                                    onChange={e => handleLinesChange('bands', parseInt(e.target.value))}
+                                    className="slider-input"
+                                />
+                            </div>
+                        )}
                         <div className="control-group">
                             <label className="control-header">Length <span>{params.lines.length.toFixed(1)}x</span></label>
                             <input

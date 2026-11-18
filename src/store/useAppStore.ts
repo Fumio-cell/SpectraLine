@@ -4,7 +4,7 @@ import type { Params, ProjectManifest, Look, LookParams, ProjectInput } from '..
 /** Fixed default so a fresh session is reproducible. Random replaces it with a visible number. */
 export const DEFAULT_SEED = 1;
 
-const flow: LookParams = { mode: 'flow', spacing: 2.4, length: 1, calm: 0.12, levels: 46, minLength: 24, width: 1.5 };
+const flow: LookParams = { mode: 'flow', spacing: 2.4, length: 1, calm: 0.04, bands: 9, levels: 46, minLength: 24, width: 1.5 };
 
 const defaultParams: Params = {
     preview: { previewMaxEdge: 1024 },
@@ -21,12 +21,12 @@ const defaultParams: Params = {
 
 const presets: Look[] = [
     { presetId: 'flow', name: 'FLOW', lines: flow },
-    { presetId: 'flow-fine', name: 'FLOW FINE', lines: { ...flow, spacing: 2.4, length: 0.8, width: 0.9 } },
     { presetId: 'flow-bold', name: 'FLOW BOLD', lines: { ...flow, spacing: 2.6, length: 2.2, width: 2.8 } },
-    { presetId: 'isolines', name: 'ISOLINES', lines: { ...flow, mode: 'isolines', width: 1.2 } }
+    { presetId: 'isolines', name: 'ISOLINES', lines: { ...flow, mode: 'isolines', width: 1.2 } },
+    { presetId: 'spectrum', name: 'SPECTRUM', lines: { ...flow, mode: 'spectrum', calm: 0, width: 1.5 } }
 ];
 
-const LOOK_FIELDS: Array<keyof LookParams> = ['mode', 'spacing', 'length', 'calm', 'levels', 'minLength', 'width'];
+const LOOK_FIELDS: Array<keyof LookParams> = ['mode', 'spacing', 'length', 'calm', 'bands', 'levels', 'minLength', 'width'];
 
 interface AppState {
     manifest: ProjectManifest;

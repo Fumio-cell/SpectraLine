@@ -10,6 +10,13 @@ import type { StrokeSet } from './trace';
  * premultiplied RGBA and converted to 8 bit once at the end.
  */
 
+/**
+ * How the energy of the picture at a vertex becomes the line there. These two functions are the
+ * only place a line's width and brightness come from; the input is a measured value, 0..1.
+ */
+export const energyWidth = (e: number) => 0.5 + 0.9 * e;
+export const energyAlpha = (e: number) => 0.06 + 0.94 * Math.pow(e, 1.2);
+
 export interface RasterOptions {
     /** Source (working) size the strokes live in. */
     srcW: number;
@@ -32,7 +39,7 @@ export function rasterize(set: StrokeSet, o: RasterOptions): Uint8ClampedArray {
 
     let ptsX = new Float32Array(256), ptsY = new Float32Array(256);
     let ptsR = new Float32Array(256), ptsG = new Float32Array(256), ptsB = new Float32Array(256);
-    let ptsW = new Float32Array(256);
+    let ptsW = new Float32Array(256), ptsA = new Float32Array(256);
 
     for (let s = 0; s < set.count; s++) {
         const v0 = set.start[s], v1 = set.start[s + 1];
@@ -43,12 +50,11 @@ export function rasterize(set: StrokeSet, o: RasterOptions): Uint8ClampedArray {
             const c = cap * 2;
             ptsX = new Float32Array(c); ptsY = new Float32Array(c);
             ptsR = new Float32Array(c); ptsG = new Float32Array(c); ptsB = new Float32Array(c);
-            ptsW = new Float32Array(c);
+            ptsW = new Float32Array(c); ptsA = new Float32Array(c);
         }
 
         // Build (sub-divided) point list in output space with per-point width.
-        const baseW = Math.max(0.05, o.width) * scale * set.wMul[s] * 0.5; // radius
-        const alpha = set.alpha[s];
+        const baseW = Math.max(0.05, o.width) * scale * 0.5; // radius at energy 1 is 1.4x this
         let m = 0;
         for (let i = 0; i < n - 1; i++) {
             const a = v0 + i;
@@ -69,20 +75,17 @@ export function rasterize(set: StrokeSet, o: RasterOptions): Uint8ClampedArray {
                 ptsR[m] = set.r[a] + (set.r[b] - set.r[a]) * t;
                 ptsG[m] = set.g[a] + (set.g[b] - set.g[a]) * t;
                 ptsB[m] = set.b[a] + (set.b[b] - set.b[a]) * t;
+                const e = (set.e[a] + (set.e[b] - set.e[a]) * t) / 255;
+                ptsW[m] = baseW * energyWidth(e);
+                ptsA[m] = energyAlpha(e);
                 m++;
             }
         }
         ptsX[m] = set.x[v1 - 1] * kx; ptsY[m] = set.y[v1 - 1] * ky;
         ptsR[m] = set.r[v1 - 1]; ptsG[m] = set.g[v1 - 1]; ptsB[m] = set.b[v1 - 1];
+        ptsW[m] = baseW * energyWidth(set.e[v1 - 1] / 255);
+        ptsA[m] = energyAlpha(set.e[v1 - 1] / 255);
         m++;
-
-        // Tapered ends: the line thins to ~35 % over the first/last 15 %.
-        const edge = Math.max(1, 0.15 * (m - 1));
-        for (let i = 0; i < m; i++) {
-            const d = Math.min(i, m - 1 - i) / edge;
-            const tt = d >= 1 ? 1 : d * d * (3 - 2 * d);
-            ptsW[i] = baseW * (0.35 + 0.65 * tt);
-        }
 
         for (let i = 0; i < m - 1; i++) {
             drawSegment(
@@ -90,7 +93,7 @@ export function rasterize(set: StrokeSet, o: RasterOptions): Uint8ClampedArray {
                 ptsX[i], ptsY[i], ptsX[i + 1], ptsY[i + 1],
                 ptsW[i], ptsW[i + 1],
                 ptsR[i], ptsG[i], ptsB[i], ptsR[i + 1], ptsG[i + 1], ptsB[i + 1],
-                alpha, i === 0, i === m - 2
+                ptsA[i], ptsA[i + 1], i === 0, i === m - 2
             );
         }
     }
@@ -122,7 +125,7 @@ function drawSegment(
     x0: number, y0: number, x1: number, y1: number,
     r0: number, r1: number,
     cr0: number, cg0: number, cb0: number, cr1: number, cg1: number, cb1: number,
-    alpha: number, first: boolean, last: boolean
+    al0: number, al1: number, first: boolean, last: boolean
 ) {
     const dx = x1 - x0, dy = y1 - y0;
     const len2 = dx * dx + dy * dy;
@@ -149,7 +152,7 @@ function drawSegment(
             let cov = r + 0.5 - d;
             if (cov <= 0) continue;
             if (cov > 1) cov = 1;
-            const a = cov * alpha;
+            const a = cov * (al0 + (al1 - al0) * tc);
             const k = (py * W + px) * 4;
             const cr = (cr0 + (cr1 - cr0) * tc) * 257;
             const cg = (cg0 + (cg1 - cg0) * tc) * 257;

@@ -7,7 +7,7 @@ export interface MapParams {
 }
 
 /** FLOW follows the edge-tangent field; ISOLINES traces contours of luminance. */
-export type LineMode = 'flow' | 'isolines';
+export type LineMode = 'flow' | 'isolines' | 'spectrum';
 export type Background = 'black' | 'transparent';
 
 /** The part of the line settings that a "look" defines. */
@@ -19,6 +19,8 @@ export interface LookParams {
     length: number;
     /** FLOW: share of ink kept in flat areas (0 = none, 1 = as dense as everywhere). */
     calm: number;
+    /** SPECTRUM: number of wavelength bands (a further band holds the purples). */
+    bands: number;
     /** ISOLINES: number of luminance levels. */
     levels: number;
     /** ISOLINES: shortest contour kept, in px at a 1024 px long edge. */
