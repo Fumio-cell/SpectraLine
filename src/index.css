@@ -77,8 +77,6 @@ a { color: var(--paper); text-underline-offset: 3px; }
 .field-row .field { flex: 1; min-width: 0; }
 
 .btn-wide { width: 100%; }
-.motion-chips { display: flex; gap: var(--space-1); }
-.motion-chips .chip { width: auto; padding: 4px 8px; }
 .btn-small { padding: var(--space-1) var(--space-2); }
 .btn-small[aria-pressed='true'] { border-color: var(--paper); color: var(--acid); }
 .field-ends { display: flex; justify-content: space-between; }
@@ -183,3 +181,30 @@ a { color: var(--paper); text-underline-offset: 3px; }
     background: color-mix(in srgb, var(--ink-stage) 88%, transparent);
 }
 .drop-veil .display { font-size: 34px; }
+
+/* ---- short windows ------------------------------------------------------------------------------ */
+/* On a window 900 px high or less the control column is made denser so that every state fits without scrolling. */
+.field-group.inline { flex-direction: row; align-items: center; flex-wrap: wrap; gap: var(--space-1) var(--space-2); }
+.field-group.inline .field-label { flex: 0 0 76px; }
+.field-group.inline .field { flex: 1; min-width: 0; }
+.field-group.inline .note { flex: 1 0 100%; }
+.motion-note { min-height: 0; }
+.field-row .btn { flex: 1; }
+
+@media (max-height: 900px) {
+    .controls { gap: 10px; padding-top: 10px; padding-bottom: 10px; }
+    .section { gap: 6px; }
+    .looks { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-1); }
+    .chip-look { padding: 5px 10px; }
+    .chip-look .chip-note { display: none; }
+    .chip-look .chip-name { flex: none; }
+    .field-group.slider { display: grid; grid-template-columns: 76px 1fr 34px; align-items: center; column-gap: var(--space-2); }
+    .field-group.slider .field-head { display: contents; }
+    .field-group.slider .field-label { grid-column: 1; grid-row: 1; }
+    .field-group.slider input[type='range'] { grid-column: 2; grid-row: 1; }
+    .field-group.slider .field-value { grid-column: 3; grid-row: 1; text-align: right; }
+    #scale-note { display: none; }
+    .strip { height: 34px; }
+    .strip-note { display: none; }
+    .motion-note { display: none; }
+}

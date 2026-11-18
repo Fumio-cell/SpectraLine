@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { DEFAULT_CONTRAST } from '../core/lines/raster';
 import { DEFAULT_SCALE } from '../core/lines/field';
 import { LENGTH_DEFAULT } from '../core/lines/motion';
-import type { Params, Look, LookParams, ProjectInput } from '../core/types';
+import type { Params, Look, LookParams, ProjectInput, VideoSize } from '../core/types';
 import type { SpectrumCell } from '../core/lines/spectrum';
 
 /** Fixed default so a fresh session is reproducible. Random replaces it with a visible number. */
@@ -37,6 +37,10 @@ interface AppState {
     playing: boolean;
     /** Progress of a video export, 0..1, or null when none is running. */
     exportProgress: number | null;
+    /** Which video export is running: the MP4 or the PNG sequence. */
+    exportKind: 'mp4' | 'frames' | null;
+    /** HD (short side 1080) or UHD (4K, short side 2160); the demo build always exports 1024 px on the long side. */
+    videoSize: Exclude<VideoSize, 'demo'>;
     /** A message shown on the page (errors and notes), or null. */
     notice: string | null;
     /** PRISM: the picture's own measured spectrum (one cell per band), once the worker has it. */
@@ -47,6 +51,8 @@ interface AppState {
     updateMotion: (update: Partial<Params['motion']>) => void;
     setPlaying: (playing: boolean) => void;
     setExportProgress: (p: number | null) => void;
+    setExportKind: (k: 'mp4' | 'frames' | null) => void;
+    setVideoSize: (s: Exclude<VideoSize, 'demo'>) => void;
     applyLook: (lookId: string) => void;
     setProcessing: (isProcessing: boolean) => void;
     setExporting: (isExporting: boolean) => void;
@@ -64,6 +70,8 @@ export const useAppStore = create<AppState>((set) => ({
     isExporting: false,
     playing: true,
     exportProgress: null,
+    exportKind: null,
+    videoSize: 'hd',
     notice: null,
     spectrum: null,
 
@@ -82,6 +90,8 @@ export const useAppStore = create<AppState>((set) => ({
     updateMotion: (update) => set((state) => ({ params: { ...state.params, motion: { ...state.params.motion, ...update } } })),
     setPlaying: (playing) => set({ playing }),
     setExportProgress: (exportProgress) => set({ exportProgress }),
+    setExportKind: (exportKind) => set({ exportKind }),
+    setVideoSize: (videoSize) => set({ videoSize }),
 
     // A look sets the drawing parameters it defines; seed, background, contrast and export size stay as chosen.
     applyLook: (lookId) => set((state) => {

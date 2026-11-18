@@ -1,7 +1,8 @@
-import type { Params, MotionParams } from './types';
+import type { Params, MotionParams, VideoSize } from './types';
 import type { WorkerRequest, WorkerResponse } from './worker/messageTypes';
 import type { SpectrumCell } from './lines/spectrum';
 import { sizeForEdge, WORK_EDGE } from './lines/render';
+import { videoDims } from './lines/motion';
 
 /** Long edge of the on-screen drawing. */
 export const PREVIEW_EDGE = 1024;
@@ -32,6 +33,7 @@ export class AppEngine {
     private spectrumRequestId = '';
     private pendingExports = new Map<string, PendingExport>();
     private pendingFrames = new Map<string, (ok: boolean) => void>();
+    private pendingParts = new Map<string, Blob[]>();
 
     public onRenderComplete?: () => void;
     public onSpectrum?: (cells: SpectrumCell[]) => void;
@@ -50,6 +52,7 @@ export class AppEngine {
     private handle(res: WorkerResponse) {
         if (res.type === 'ERROR') {
             console.error('[Engine] Worker error:', res.error.message);
+            this.pendingParts.delete(res.requestId);
             const frame = this.pendingFrames.get(res.requestId);
             if (frame) { this.pendingFrames.delete(res.requestId); frame(false); }
             const pending = this.pendingExports.get(res.requestId);
@@ -84,7 +87,7 @@ export class AppEngine {
             return;
         }
 
-        if (res.type === 'MP4_PROGRESS') {
+        if (res.type === 'EXPORT_PROGRESS') {
             this.pendingExports.get(res.requestId)?.onProgress?.(res.done, res.total);
             return;
         }
@@ -95,6 +98,26 @@ export class AppEngine {
             this.pendingExports.delete(res.requestId);
             const blob = new Blob([res.buffer], { type: 'video/mp4' });
             console.log(`[Engine] MP4 ${res.width}x${res.height}, ${res.frames} frames, H.264 level ${res.level}: trace ${res.ms.trace} ms, plan ${res.ms.plan} ms, encode ${res.ms.encode} ms, ${(blob.size / 1024).toFixed(0)} KB`);
+            downloadBlob(blob, pending.filename);
+            pending.resolve({ width: res.width, height: res.height, bytes: blob.size });
+            return;
+        }
+
+        if (res.type === 'FRAMES_CHUNK') {
+            // Each entry becomes its own Blob at once, so a long sequence is held by the browser's blob storage, not by the page.
+            const parts = this.pendingParts.get(res.requestId);
+            if (parts) parts.push(new Blob([res.buffer]));
+            return;
+        }
+
+        if (res.type === 'FRAMES_READY') {
+            const pending = this.pendingExports.get(res.requestId);
+            const parts = this.pendingParts.get(res.requestId);
+            this.pendingParts.delete(res.requestId);
+            if (!pending || !parts) return;
+            this.pendingExports.delete(res.requestId);
+            const blob = new Blob(parts, { type: 'application/zip' });
+            console.log(`[Engine] PNG sequence ${res.width}x${res.height}, ${res.frames} frames: trace ${res.ms.trace} ms, plan ${res.ms.plan} ms, encode ${res.ms.encode} ms, ${(blob.size / 1048576).toFixed(1)} MB`);
             downloadBlob(blob, pending.filename);
             pending.resolve({ width: res.width, height: res.height, bytes: blob.size });
             return;
@@ -173,16 +196,40 @@ export class AppEngine {
         }));
     }
 
-    /** Render the clip in the worker (1080 px on the long edge, 30 fps, H.264, no sound) and download it. */
-    public async exportMP4(params: Params, filename: (size: { width: number; height: number }) => string, onProgress?: (done: number, total: number) => void): Promise<ExportResult> {
+    /** The pixel size a video of this kind has for the loaded picture. */
+    public videoSize(size: VideoSize): { width: number; height: number } {
+        const d = videoDims(this.origW, this.origH, size);
+        return { width: d.w, height: d.h };
+    }
+
+    /**
+     * Render the clip in the worker (30 fps, H.264, no sound) and download it. HD and 4K are sized by the short side;
+     * the demo build is 1024 px on the long side, with the watermark.
+     */
+    public async exportMP4(params: Params, size: VideoSize, filename: (size: { width: number; height: number }) => string, onProgress?: (done: number, total: number) => void, bitrate?: number): Promise<ExportResult> {
         await this.sourcePromise;
         if (!this.origW) throw new Error('No image loaded for export.');
         const id = `mp4_${++this.seq}`;
+        const { width, height } = this.videoSize(size);
         return new Promise<ExportResult>((resolve, reject) => {
-            // The name needs the size the worker chooses; it is the long edge, so a placeholder size is enough here.
-            const { w, h } = sizeForEdge(this.origW, this.origH, 1080);
-            this.pendingExports.set(id, { filename: filename({ width: w, height: h }), resolve, reject, onProgress });
-            this.send({ type: 'EXPORT_MP4', requestId: id, lines: params.lines, motion: params.motion });
+            this.pendingExports.set(id, { filename: filename({ width, height }), resolve, reject, onProgress });
+            this.send({
+                type: 'EXPORT_MP4', requestId: id, lines: params.lines, motion: params.motion, size, bitrate,
+                watermark: DEMO_MODE ? demoWatermarkMask(width, height) : undefined
+            });
+        });
+    }
+
+    /** Render the clip as a zip of PNG frames (real alpha when the background is transparent) and download it. */
+    public async exportFrames(params: Params, size: VideoSize, filename: (size: { width: number; height: number }) => string, onProgress?: (done: number, total: number) => void): Promise<ExportResult> {
+        await this.sourcePromise;
+        if (!this.origW) throw new Error('No image loaded for export.');
+        const id = `frames_${++this.seq}`;
+        const { width, height } = this.videoSize(size);
+        return new Promise<ExportResult>((resolve, reject) => {
+            this.pendingParts.set(id, []);
+            this.pendingExports.set(id, { filename: filename({ width, height }), resolve, reject, onProgress });
+            this.send({ type: 'EXPORT_FRAMES', requestId: id, lines: params.lines, motion: params.motion, size });
         });
     }
 

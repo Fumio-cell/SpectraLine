@@ -3,8 +3,9 @@ import type { Params } from '../types';
 import { analyse, buildStrokes, drawLines, geometryKey, sigmaOfScale, type Field, type StrokeSet } from '../lines/render';
 import { measureBands, spectrumCells } from '../lines/spectrum';
 import { encodePNG } from '../lines/png';
-import { buildPlan, prepareMotion, renderFrame, type MotionPlan, type MotionTables } from '../lines/motion';
-import { encodeMp4, videoSize } from '../video';
+import { buildPlan, frameCount, frameTime, prepareMotion, renderFrame, videoDims, type MotionPlan, type MotionTables } from '../lines/motion';
+import { encodeMp4 } from '../video';
+import { ZipWriter } from '../zip';
 
 /** The spectrum is always measured in 9 bands plus the purples. */
 const SPECTRUM_BANDS = 9;
@@ -34,7 +35,7 @@ let tablesCache: { key: string; tables: MotionTables } | null = null;
 
 function getPlan(lines: Params['lines'], w: number, h: number): { plan: MotionPlan; traceMs: number; planMs: number } {
     const { set, field: f, traceMs } = getStrokes(lines);
-    const key = [geometryKey(lines), lines.contrast, lines.solo.join(','), w, h].join('|');
+    const key = [geometryKey(lines), lines.contrast, lines.solo.join(','), lines.background, w, h].join('|');
     let planMs = 0;
     if (!planCache || planCache.key !== key) {
         const t0 = performance.now();
@@ -116,16 +117,50 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 
         else if (req.type === 'EXPORT_MP4') {
             if (!source) throw new Error('No image loaded');
-            const { w, h } = videoSize(source.w, source.h);
-            const { plan, traceMs, planMs } = getPlan(req.lines, w, h);
+            const { w, h } = videoDims(source.w, source.h, req.size);
+            // A video has no alpha: it is always drawn on black.
+            const { plan, traceMs, planMs } = getPlan({ ...req.lines, background: 'black' }, w, h);
             const tables = getTables(plan, req.motion.mode, req.motion.length);
+            const mark = req.watermark ?? null;
             const t0 = performance.now();
-            const r = await encodeMp4(plan, tables, (done, total) => post({ type: 'MP4_PROGRESS', requestId: req.requestId, done, total } as WorkerResponse));
+            const r = await encodeMp4(plan, tables, {
+                size: req.size, bitrate: req.bitrate,
+                decorate: mark ? (rgba) => applyWatermark(rgba, w, mark) : undefined,
+                onProgress: (done, total) => post({ type: 'EXPORT_PROGRESS', requestId: req.requestId, done, total } as WorkerResponse)
+            });
             post({
                 type: 'MP4_READY', requestId: req.requestId, status: 'ok',
                 buffer: r.bytes.buffer, width: r.width, height: r.height, frames: r.frames, level: r.level,
                 ms: { trace: traceMs, plan: planMs, encode: Math.round(performance.now() - t0) }
             } as WorkerResponse, [r.bytes.buffer]);
+        }
+
+        else if (req.type === 'EXPORT_FRAMES') {
+            if (!source) throw new Error('No image loaded');
+            const { w, h } = videoDims(source.w, source.h, req.size);
+            // A PNG sequence keeps the background that was chosen: transparent gives real alpha.
+            const { plan, traceMs, planMs } = getPlan(req.lines, w, h);
+            const tables = getTables(plan, req.motion.mode, req.motion.length);
+            const total = frameCount(req.motion.length);
+            const zip = new ZipWriter();
+            const t0 = performance.now();
+            const buffer = new Uint8ClampedArray(w * h * 4);
+            let bytes = 0;
+            for (let i = 0; i < total; i++) {
+                const rgba = renderFrame(plan, tables, frameTime(req.motion.mode, req.motion.length, i), buffer);
+                const png = await encodePNG(rgba, w, h);
+                const entry = zip.add(`frame_${String(i + 1).padStart(4, '0')}.png`, png);
+                bytes += entry.length;
+                post({ type: 'FRAMES_CHUNK', requestId: req.requestId, buffer: entry.buffer } as WorkerResponse, [entry.buffer as ArrayBuffer]);
+                post({ type: 'EXPORT_PROGRESS', requestId: req.requestId, done: i + 1, total } as WorkerResponse);
+            }
+            const tail = zip.finish();
+            bytes += tail.length;
+            post({ type: 'FRAMES_CHUNK', requestId: req.requestId, buffer: tail.buffer } as WorkerResponse, [tail.buffer as ArrayBuffer]);
+            post({
+                type: 'FRAMES_READY', requestId: req.requestId, status: 'ok', width: w, height: h, frames: total, bytes,
+                ms: { trace: traceMs, plan: planMs, encode: Math.round(performance.now() - t0) }
+            } as WorkerResponse);
         }
 
         else if (req.type === 'EXPORT_PNG') {

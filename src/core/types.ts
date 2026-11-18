@@ -35,8 +35,14 @@ export interface LineParams extends LookParams {
 
 export type ExportEdge = 1024 | 2048 | 4096;
 
-/** STILL draws the picture; EMERGE grows the lines along their flow; PULSE sends light along them (see lines/motion.ts). */
-export type MotionMode = 'still' | 'emerge' | 'pulse';
+/**
+ * STILL draws the picture; EMERGE grows the lines along their flow; PULSE sends light along them;
+ * BOTH is EMERGE and then PULSE in one clip (see lines/motion.ts).
+ */
+export type MotionMode = 'still' | 'emerge' | 'pulse' | 'both';
+
+/** Video sizes: HD has a short side of 1080 px, UHD (4K) of 2160 px, DEMO a long side of 1024 px. */
+export type VideoSize = 'hd' | 'uhd' | 'demo';
 
 export interface MotionParams {
     mode: MotionMode;
