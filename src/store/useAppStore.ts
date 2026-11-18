@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { DEFAULT_CONTRAST } from '../core/lines/raster';
 import type { Params, ProjectManifest, Look, LookParams, ProjectInput } from '../core/types';
 
 /** Fixed default so a fresh session is reproducible. Random replaces it with a visible number. */
@@ -15,13 +16,13 @@ const defaultParams: Params = {
         gradientThreshold: 0.05,
         scientificMode: false
     },
-    lines: { ...flow, background: 'black', seed: DEFAULT_SEED },
+    lines: { ...flow, background: 'black', seed: DEFAULT_SEED, contrast: DEFAULT_CONTRAST },
     export: { edge: 2048 }
 };
 
 const presets: Look[] = [
     { presetId: 'flow', name: 'FLOW', lines: flow },
-    { presetId: 'flow-bold', name: 'FLOW BOLD', lines: { ...flow, spacing: 2.6, length: 2.2, width: 2.8 } },
+    { presetId: 'flow-bold', name: 'FLOW BOLD', lines: { ...flow, spacing: 2.6, length: 3, width: 3.4 } },
     { presetId: 'isolines', name: 'ISOLINES', lines: { ...flow, mode: 'isolines', width: 1.2 } },
     { presetId: 'spectrum', name: 'SPECTRUM', lines: { ...flow, mode: 'spectrum', calm: 0, width: 1.5 } }
 ];

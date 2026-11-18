@@ -1,4 +1,4 @@
-import { fieldFromTensor, percentile, structure, type Field } from './field';
+import { blur, fieldFromTensor, percentile, structure, type Field } from './field';
 import { D65_X, D65_Y, SRGB_TO_XYZ_IEC as MX, locusXY, srgbToLinear, xyToDominant, type Dominant } from '../maps/colorscience';
 
 /**
@@ -97,31 +97,55 @@ function oetf(c: number): number {
     return v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
 }
 
+const LUT_STEPS = 64;
+
 /**
- * The most saturated colour sRGB can show that keeps the chromaticity's dominant wavelength:
- * mix the monochromatic stimulus with white (which slides along the same ray from white)
- * until the first channel reaches zero, then scale to full brightness.
+ * Colour table for one hue: the stimulus whose chromaticity lies at excitation purity p on the ray
+ * from the D65 white point towards (hx, hy), for p = 0 (white) .. 1 (the locus or line of purples).
+ * Purities sRGB cannot show are limited to the gamut edge, which keeps the hue. Each entry is
+ * scaled to full brightness (the line's brightness comes from the picture's energy, not from here).
  */
-export function gamutColour(x: number, y: number): [number, number, number] {
-    const X = x / y, Y = 1, Z = (1 - x - y) / y;
-    const s = [MI[0] * X + MI[1] * Y + MI[2] * Z, MI[3] * X + MI[4] * Y + MI[5] * Z, MI[6] * X + MI[7] * Y + MI[8] * Z];
-    let k = 1;
-    for (let c = 0; c < 3; c++) if (s[c] < 0) k = Math.min(k, 1 / (1 - s[c]));
-    const rgb = s.map(v => (1 - k) + k * v);
-    const m = Math.max(rgb[0], rgb[1], rgb[2]);
-    return [255 * oetf(rgb[0] / m), 255 * oetf(rgb[1] / m), 255 * oetf(rgb[2] / m)];
+export function tintLut(hx: number, hy: number): Float32Array {
+    const rgbAt = (p: number, out: number[]) => {
+        const x = D65_X + p * (hx - D65_X), y = D65_Y + p * (hy - D65_Y);
+        const X = x / y, Z = (1 - x - y) / y;
+        out[0] = MI[0] * X + MI[1] + MI[2] * Z;
+        out[1] = MI[3] * X + MI[4] + MI[5] * Z;
+        out[2] = MI[6] * X + MI[7] + MI[8] * Z;
+    };
+    const c = [0, 0, 0];
+    rgbAt(1, c);
+    let pmax = 1;
+    if (Math.min(c[0], c[1], c[2]) < 0) {
+        let lo = 0, hi = 1;
+        for (let i = 0; i < 40; i++) {
+            const mid = 0.5 * (lo + hi);
+            rgbAt(mid, c);
+            if (Math.min(c[0], c[1], c[2]) >= 0) lo = mid; else hi = mid;
+        }
+        pmax = lo;
+    }
+    const lut = new Float32Array((LUT_STEPS + 1) * 3);
+    for (let j = 0; j <= LUT_STEPS; j++) {
+        rgbAt(Math.min(j / LUT_STEPS, pmax), c);
+        const m = Math.max(c[0], c[1], c[2]);
+        for (let k = 0; k < 3; k++) lut[j * 3 + k] = 255 * oetf(Math.max(0, c[k]) / m);
+    }
+    return lut;
 }
 
-/** Display colour of a spectral band: its centre wavelength, gamut-mapped. */
-export function bandColour(wl: number): [number, number, number] {
-    const xy = locusXY(wl);
-    return gamutColour(xy[0], xy[1]);
+/** Colour from a tint table at a measured purity. */
+export function tintColour(lut: Float32Array, purity: number, out: number[]) {
+    const f = Math.min(1, Math.max(0, purity)) * LUT_STEPS;
+    const i = Math.min(LUT_STEPS - 1, Math.floor(f)), t = f - i;
+    for (let k = 0; k < 3; k++) out[k] = lut[i * 3 + k] + (lut[(i + 1) * 3 + k] - lut[i * 3 + k]) * t;
 }
 
 export interface Band {
     /** Centre wavelength in nm; null for the non-spectral (purple) band. */
     wl: number | null;
-    colour: [number, number, number];
+    /** Luminance-weighted mean purity of the band over the whole picture (the fallback where a band has no weight). */
+    meanPurity: number;
     /** Sum of the band's gradient energy: how much structure it carries. */
     mass: number;
     field: Field;
@@ -137,10 +161,12 @@ export function buildBands(rgba: Uint8ClampedArray, w: number, h: number, nBands
     const n = Math.max(2, Math.min(16, Math.round(nBands)));
     const sp = spec ?? spectrumOf(rgba, w, h);
     const bw = Math.ceil(w / BAND_DOWN), bh = Math.ceil(h / BAND_DOWN);
+    // maps: purity x luminance (the band's weight). lum: luminance alone, for the mean purity.
     const maps: Float32Array[] = [];
-    for (let k = 0; k <= n; k++) maps.push(new Float32Array(bw * bh));
+    const lum: Float32Array[] = [];
+    for (let k = 0; k <= n; k++) { maps.push(new Float32Array(bw * bh)); lum.push(new Float32Array(bw * bh)); }
     const span = BAND_HI - BAND_LO;
-    // Weighted mean chromaticity of purple pixels, for the colour of the purple band.
+    // Weighted mean chromaticity of purple pixels, for the hue of the purple band.
     let pw = 0, px = 0, py = 0;
 
     for (let y = 0; y < h; y++) {
@@ -152,7 +178,7 @@ export function buildBands(rgba: Uint8ClampedArray, w: number, h: number, nBands
             const bi = by * bw + Math.min(bw - 1, (x / BAND_DOWN) | 0);
             const wl = sp.wl[i];
             if (wl < 0) {
-                maps[n][bi] += wgt;
+                maps[n][bi] += wgt; lum[n][bi] += sp.Y[i];
                 pw += wgt; px += wgt * sp.cx[i]; py += wgt * sp.cy[i];
             } else if (wl > 0) {
                 // Linear (tent) split between the two nearest band centres.
@@ -160,21 +186,23 @@ export function buildBands(rgba: Uint8ClampedArray, w: number, h: number, nBands
                 if (u < 0) u = 0; else if (u > n - 1) u = n - 1;
                 const k = Math.min(n - 2, Math.floor(u));
                 const f = u - k;
-                maps[k][bi] += wgt * (1 - f);
-                maps[k + 1][bi] += wgt * f;
+                maps[k][bi] += wgt * (1 - f); lum[k][bi] += sp.Y[i] * (1 - f);
+                maps[k + 1][bi] += wgt * f; lum[k + 1][bi] += sp.Y[i] * f;
             }
         }
     }
     const norm = 1 / (BAND_DOWN * BAND_DOWN);
     for (const m of maps) for (let i = 0; i < m.length; i++) m[i] *= norm;
+    for (const m of lum) for (let i = 0; i < m.length; i++) m[i] *= norm;
 
     const s = Math.max(bw, bh) / 1024;
     // A band that holds next to nothing of the picture has no lines to trace: skip its analysis.
     const sums = maps.map(m => { let t = 0; for (let i = 0; i < m.length; i++) t += m[i]; return t; });
+    const lsums = lum.map(m => { let t = 0; for (let i = 0; i < m.length; i++) t += m[i]; return t; });
     const total = sums.reduce((a, b) => a + b, 0);
     const active = sums.map(t => t > EMPTY_BAND * total);
     const tensors = maps.map((m, k) => (active[k] ? structure(m, bw, bh, s) : null));
-    // One normaliser for all bands (98th percentile of the strongest band at each pixel), so a band
+    // One normaliser for all bands (percentile of the strongest band at each pixel), so a band
     // that hardly exists in the picture stays faint instead of being stretched to full strength.
     const maxE = new Float32Array(bw * bh);
     for (const t of tensors) if (t) for (let i = 0; i < maxE.length; i++) if (t.energy[i] > maxE[i]) maxE[i] = t.energy[i];
@@ -183,26 +211,40 @@ export function buildBands(rgba: Uint8ClampedArray, w: number, h: number, nBands
     const centres = bandCentres(n);
     const bands: Band[] = [];
     for (let k = 0; k <= n; k++) {
-        let colour: [number, number, number];
-        let wlc: number | null = null;
+        // Hue of the band: its centre wavelength; the purple band points at the mean purple direction.
+        let hx: number, hy: number, wlc: number | null = null;
         if (k < n) {
             wlc = centres[k];
-            colour = bandColour(wlc);
+            const xy = locusXY(wlc); hx = xy[0]; hy = xy[1];
         } else if (pw > 0) {
-            // Line of purples at the mean purple direction.
-            colour = purpleColour(px / pw, py / pw);
-        } else colour = [255, 0, 255];
+            [hx, hy] = purplePoint(px / pw, py / pw);
+        } else { hx = 0.45; hy = 0.2; }
+
+        const meanPurity = lsums[k] > 0 ? Math.min(1, sums[k] / lsums[k]) : 0;
         const tk = tensors[k];
-        const field = tk ? fieldFromTensor(tk, bw, bh, s, scale, { fixed: colour }) : EMPTY_FIELD;
+        let field: Field = EMPTY_FIELD;
         let mass = 0;
-        if (tk) for (let i = 0; i < field.en.length; i++) mass += field.en[i];
-        bands.push({ wl: wlc, colour, mass, field });
+        if (tk) {
+            // Purity measured at each point: luminance-weighted mean purity of the band's light,
+            // smoothed at the scale the structure is measured at. weight / luminance = purity.
+            const lumSm = blur(lum[k], bw, bh, 3 * s);
+            const purity = new Float32Array(bw * bh);
+            let peak = 0;
+            for (let i = 0; i < purity.length; i++) if (lumSm[i] > peak) peak = lumSm[i];
+            const floor = 0.01 * peak;
+            for (let i = 0; i < purity.length; i++) {
+                purity[i] = lumSm[i] > floor ? Math.min(1, tk.smooth[i] / lumSm[i]) : meanPurity;
+            }
+            field = fieldFromTensor(tk, bw, bh, s, scale, { tint: { lut: tintLut(hx, hy), purity } });
+            for (let i = 0; i < field.en.length; i++) mass += field.en[i];
+        }
+        bands.push({ wl: wlc, meanPurity, mass, field });
     }
     return { n, bands };
 }
 
-/** Colour on the line of purples in the direction of (x, y) from the white point. */
-function purpleColour(x: number, y: number): [number, number, number] {
+/** Point on the line of purples in the direction of (x, y) from the white point. */
+function purplePoint(x: number, y: number): [number, number] {
     const dx = x - D65_X, dy = y - D65_Y;
     const d = Math.hypot(dx, dy) || 1;
     // Line of purples: from the 360 nm end to the 830 nm end of the locus.
@@ -211,5 +253,5 @@ function purpleColour(x: number, y: number): [number, number, number] {
     const ux = dx / d, uy = dy / d;
     const den = ux * ey - uy * ex;
     const r = Math.abs(den) > 1e-12 ? ((a[0] - D65_X) * ey - (a[1] - D65_Y) * ex) / den : 0.3;
-    return gamutColour(D65_X + ux * r, D65_Y + uy * r);
+    return [D65_X + ux * r, D65_Y + uy * r];
 }

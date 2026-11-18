@@ -205,6 +205,19 @@ const Inspector = ({ demoLimited = false }: { demoLimited?: boolean }) => {
                 </div>
 
                 <div className="control-group">
+                    <label className="control-header">Contrast <span>{params.lines.contrast.toFixed(2)}</span></label>
+                    <input
+                        type="range" min="0" max="2" step="0.05"
+                        value={params.lines.contrast}
+                        onChange={e => handleLinesChange('contrast', parseFloat(e.target.value))}
+                        className="slider-input"
+                    />
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                        0 draws every line alike; higher lets strong places glow and calm places fade.
+                    </div>
+                </div>
+
+                <div className="control-group">
                     <label className="control-header">Background</label>
                     <select
                         className="select-input"

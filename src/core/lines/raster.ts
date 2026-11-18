@@ -11,11 +11,17 @@ import type { StrokeSet } from './trace';
  */
 
 /**
- * How the energy of the picture at a vertex becomes the line there. These two functions are the
- * only place a line's width and brightness come from; the input is a measured value, 0..1.
+ * How the energy of the picture at a vertex becomes the line there. These functions are the only
+ * place a line's width and brightness come from; the input is a measured value, 0..1.
+ *
+ * The curve is e^contrast: monotonic for every contrast >= 0, so a weaker point is never brighter
+ * or wider than a stronger one and nothing is added. Contrast 0 is flat (every vertex alike, as
+ * in SL-1); larger values make strong places glow and calm places fade.
  */
-export const energyWidth = (e: number) => 0.5 + 0.9 * e;
-export const energyAlpha = (e: number) => 0.06 + 0.94 * Math.pow(e, 1.2);
+export const DEFAULT_CONTRAST = 0.75;
+export const energyCurve = (e: number, contrast: number) => Math.pow(e, contrast);
+export const energyWidth = (e: number, contrast: number) => 0.5 + 0.9 * energyCurve(e, contrast);
+export const energyAlpha = (e: number, contrast: number) => 0.06 + 0.94 * energyCurve(e, contrast);
 
 export interface RasterOptions {
     /** Source (working) size the strokes live in. */
@@ -26,11 +32,14 @@ export interface RasterOptions {
     /** Line width in px at a 1024 px long edge. */
     width: number;
     background: Background;
+    /** Exponent of the energy curve (see energyCurve); default DEFAULT_CONTRAST. */
+    contrast?: number;
 }
 
 export function rasterize(set: StrokeSet, o: RasterOptions): Uint8ClampedArray {
     const { outW, outH } = o;
     const kx = outW / o.srcW, ky = outH / o.srcH;
+    const contrast = o.contrast ?? DEFAULT_CONTRAST;
     const scale = Math.max(outW, outH) / 1024;
     const acc = new Uint16Array(outW * outH * 4);
 
@@ -76,15 +85,15 @@ export function rasterize(set: StrokeSet, o: RasterOptions): Uint8ClampedArray {
                 ptsG[m] = set.g[a] + (set.g[b] - set.g[a]) * t;
                 ptsB[m] = set.b[a] + (set.b[b] - set.b[a]) * t;
                 const e = (set.e[a] + (set.e[b] - set.e[a]) * t) / 255;
-                ptsW[m] = baseW * energyWidth(e);
-                ptsA[m] = energyAlpha(e);
+                ptsW[m] = baseW * energyWidth(e, contrast);
+                ptsA[m] = energyAlpha(e, contrast);
                 m++;
             }
         }
         ptsX[m] = set.x[v1 - 1] * kx; ptsY[m] = set.y[v1 - 1] * ky;
         ptsR[m] = set.r[v1 - 1]; ptsG[m] = set.g[v1 - 1]; ptsB[m] = set.b[v1 - 1];
-        ptsW[m] = baseW * energyWidth(set.e[v1 - 1] / 255);
-        ptsA[m] = energyAlpha(set.e[v1 - 1] / 255);
+        ptsW[m] = baseW * energyWidth(set.e[v1 - 1] / 255, contrast);
+        ptsA[m] = energyAlpha(set.e[v1 - 1] / 255, contrast);
         m++;
 
         for (let i = 0; i < m - 1; i++) {

@@ -29,8 +29,11 @@ export interface Field {
      * bright and how wide a FLOW line is at a point; it is a pure function of the picture.
      */
     en: Float32Array;
-    /** SPECTRUM band fields draw in one measured colour instead of sampling the picture. */
-    fixed?: [number, number, number];
+    /**
+     * SPECTRUM band fields take their colour from the band's hue at the purity measured at the
+     * point, instead of sampling the picture's RGB.
+     */
+    tint?: Tint;
     /** The analysed picture (SPECTRUM reads it) and the band set built from it, cached by band count. */
     rgba?: Uint8ClampedArray;
     spec?: import('./spectrum').BandSet;
@@ -118,7 +121,17 @@ export function percentile(values: Float32Array, p: number): number {
     return max;
 }
 
+/** Colour of a SPECTRUM band: its hue, as a table over excitation purity 0..1, plus the measured purity. */
+export interface Tint {
+    /** 65 entries (purity 0, 1/64 .. 1) of r, g, b in 0..255. */
+    lut: Float32Array;
+    /** Measured purity of the band at each field pixel, 0..1. */
+    purity: Float32Array;
+}
+
 export interface Tensor {
+    /** The map blurred at 3*s (the gradient is taken from it). */
+    smooth: Float32Array;
     tx: Float32Array; ty: Float32Array; coh: Float32Array;
     /** sqrt(trace of the structure tensor): raw gradient energy, unnormalised. */
     energy: Float32Array;
@@ -168,7 +181,7 @@ export function structure(map: Float32Array, w: number, h: number, s: number): T
         tx[i] = -sg2;
         ty[i] = cg2;
     }
-    return { tx, ty, coh, energy };
+    return { smooth: gl, tx, ty, coh, energy };
 }
 
 /** Gradient energy is normalised to 0..1 at this percentile of the picture: the top few percent saturate. */

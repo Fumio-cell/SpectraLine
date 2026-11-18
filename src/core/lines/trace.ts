@@ -1,6 +1,6 @@
 import type { LineParams } from '../types';
 import { energyOf, isoMaps, type Field } from './field';
-import { buildBands } from './spectrum';
+import { buildBands, tintColour } from './spectrum';
 
 /**
  * A set of polylines in working-image coordinates (pixel i covers [i, i+1)).
@@ -115,8 +115,9 @@ export function vertexEnergy(f: Field, x: number, y: number): number {
 }
 
 export function vertexColour(f: Field, x: number, y: number, out: number[]) {
-    if (f.fixed) {
-        out[0] = f.fixed[0]; out[1] = f.fixed[1]; out[2] = f.fixed[2];
+    if (f.tint) {
+        // SPECTRUM: the band's hue at the purity measured at this point.
+        tintColour(f.tint.lut, bilinear(f.tint.purity, f.w, f.h, x, y), out);
         return;
     }
     const ix = Math.min(f.w - 1, Math.max(0, Math.floor(x)));
@@ -422,7 +423,8 @@ export function traceIsolines(f: Field, p: LineParams): StrokeSet {
 
         // Energy of ISOLINES = luminance slope where the contour runs, sampled at each vertex.
         const en = new Float32Array(m);
-        for (let i = 0; i < m; i++) en[i] = bilinear(slope, w, h, sx[i], sy[i]);
+        // Measured at the float32 position the vertex is stored at, so it can be re-derived exactly.
+        for (let i = 0; i < m; i++) en[i] = bilinear(slope, w, h, Math.fround(sx[i]), Math.fround(sy[i]));
 
         // Dust: a contour has to earn its place by the energy it carries along its length. The
         // "energy length" is the integral of slope x coherence-gate along the contour; grain makes

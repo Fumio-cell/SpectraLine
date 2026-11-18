@@ -31,6 +31,8 @@ export interface LookParams {
 
 export interface LineParams extends LookParams {
     background: Background;
+    /** Exponent of the energy -> brightness/width curve (0 = flat). Display only: never retraces. */
+    contrast: number;
     /** Same image + settings + seed always give the same pixels. */
     seed: number;
 }

@@ -27,6 +27,6 @@ export function sizeForEdge(srcW: number, srcH: number, edge: number): { w: numb
 export function drawLines(field: Field, strokes: StrokeSet, p: LineParams, outW: number, outH: number): Uint8ClampedArray {
     return rasterize(strokes, {
         srcW: field.w, srcH: field.h, outW, outH,
-        width: p.width, background: p.background
+        width: p.width, background: p.background, contrast: p.contrast
     });
 }
