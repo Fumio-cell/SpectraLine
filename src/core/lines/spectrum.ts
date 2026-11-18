@@ -1,4 +1,4 @@
-import { blur, fieldFromTensor, percentile, planesOf, structure, type Field } from './field';
+import { blur, fieldFromTensor, percentile, structure, type Field } from './field';
 import { D65_X, D65_Y, SRGB_TO_XYZ_IEC as MX, locusXY, srgbToLinear, xyToDominant, type Dominant } from './colorscience';
 
 /**
@@ -21,11 +21,37 @@ import { D65_X, D65_Y, SRGB_TO_XYZ_IEC as MX, locusXY, srgbToLinear, xyToDominan
 export const BAND_LO = 430;
 export const BAND_HI = 630;
 
-/** Band weight maps are sparse (edges between colour regions), so their energy is normalised at a lower percentile than the picture's. */
-const BAND_SCALE_P = 0.94;
+/**
+ * Band weight maps are sparse (edges between colour regions); their energy is normalised like the picture's
+ * (see ENERGY_MEDIAN_MULTIPLE), by a multiple of the median of the strongest band at each pixel. The multiple
+ * reproduces SL-4's normaliser (94th percentile) on average at the default scale: mean over the five samples
+ * of p94 / median = 2.87.
+ */
+const BAND_MEDIAN_MULTIPLE = 2.87;
 
 /** Bands holding less than this share of the total weight are left out. */
 const EMPTY_BAND = 0.002;
+
+/**
+ * A pixel counts towards the spectrum only if purity x luminance (the weight itself) is at least this.
+ * Below it the dominant wavelength is not a measurement: an 8-bit picture moves by one code value and the
+ * wavelength jumps. Measured on the five samples, moving every channel by +-1 code value shifts the
+ * dominant wavelength by more than half a band spacing (12.5 nm) in 76% of the pixels under 0.0005, 25% at
+ * 0.0005..0.001, 19% at 0.001..0.002, 17% at 0.002..0.005, but in 7% at 0.005..0.01, 3% at 0.02..0.05 and
+ * 0.5% above 0.05. 0.005 is where the unstable share first falls below a tenth. The pixels under it are 14%
+ * of the pixels with any weight and 0.9% of the weight.
+ */
+export const WEIGHT_FLOOR = 0.005;
+
+/**
+ * A band is present at a point when it holds at least this share of the light there, read at the scale of
+ * the field: the band's weight map blurred with the SCALE sigma, over the sum of all bands' blurred maps.
+ * Two fifths, so that at most two bands can be present at one point (three would need 0.33), and a band that
+ * is clearly the leading one always is. A lower share lets bands overlap more and a higher one leaves
+ * places where no band is present; on sample-3 at SCALE 0 vs 1 the PRISM SSIM is 0.386 at 0.33, 0.392 at 0.4,
+ * 0.407 at 0.5 and 0.454 at 0.6.
+ */
+export const PRESENCE_SHARE = 0.4;
 
 /** Stand-in field for a skipped band; it never carries a line (its mass is 0). */
 const EMPTY_FIELD = { w: 1, h: 1, s: 1, sigma: 3, lum: new Float32Array(0), cr: new Float32Array(0), cg: new Float32Array(0), cb: new Float32Array(0), tx: new Float32Array(1), ty: new Float32Array(1), coh: new Float32Array(1), str: new Float32Array(1), en: new Float32Array(1) } as Field;
@@ -167,9 +193,9 @@ export interface BandMeasure {
     bh: number;
     maps: Float32Array[];
     lum: Float32Array[];
-    /** 1 on every pixel (at the picture's own resolution, mw x mh) whose dominant wavelength belongs to the band. */
-    member: Uint8Array[];
+    /** Width of the picture the measure was taken from (band membership is built at that resolution). */
     mw: number;
+    mh: number;
     /** Sum of the weight (purity x luminance) of every band, and of luminance alone. */
     sums: number[];
     lsums: number[];
@@ -192,30 +218,11 @@ export function measureBands(rgba: Uint8ClampedArray, w: number, h: number, nBan
     if (hit) return hit;
 
     const sp = spectrumOf(rgba, w, h);
-    // Which band a point belongs to is read from the lightly blurred colour (the colour a line carries at
-    // that point), not from a single pixel, so grain does not flip the band every other pixel.
-    const pl = planesOf(rgba, w, h);
-    const soft = new Uint8ClampedArray(w * h * 4);
-    for (let i = 0; i < w * h; i++) { soft[i * 4] = pl.cr[i]; soft[i * 4 + 1] = pl.cg[i]; soft[i * 4 + 2] = pl.cb[i]; soft[i * 4 + 3] = 255; }
-    const spSoft = spectrumOf(soft, w, h);
     const bw = Math.ceil(w / BAND_DOWN), bh = Math.ceil(h / BAND_DOWN);
     const maps: Float32Array[] = [];
     const lum: Float32Array[] = [];
-    const member: Uint8Array[] = [];
-    for (let k = 0; k <= n; k++) { maps.push(new Float32Array(bw * bh)); lum.push(new Float32Array(bw * bh)); member.push(new Uint8Array(w * h)); }
+    for (let k = 0; k <= n; k++) { maps.push(new Float32Array(bw * bh)); lum.push(new Float32Array(bw * bh)); }
     const span = BAND_HI - BAND_LO;
-    const markMember = (wl: number, wgt: number, i: number) => {
-        if (wgt <= 0) return;
-        if (wl < 0) member[n][i] = 1;
-        else if (wl > 0) {
-            let u = ((wl - BAND_LO) / span) * (n - 1);
-            if (u < 0) u = 0; else if (u > n - 1) u = n - 1;
-            const k = Math.min(n - 2, Math.floor(u));
-            const f = u - k;
-            if (f < 1) member[k][i] = 1;
-            if (f > 0) member[k + 1][i] = 1;
-        }
-    };
     // Weighted mean chromaticity of purple pixels, for the hue of the purple band.
     let pw = 0, px = 0, py = 0;
 
@@ -223,9 +230,8 @@ export function measureBands(rgba: Uint8ClampedArray, w: number, h: number, nBan
         const by = Math.min(bh - 1, (y / BAND_DOWN) | 0);
         for (let x = 0; x < w; x++) {
             const i = y * w + x;
-            markMember(spSoft.wl[i], spSoft.purity[i] * spSoft.Y[i], i);
             const wgt = sp.purity[i] * sp.Y[i];
-            if (wgt <= 0) continue;
+            if (wgt < WEIGHT_FLOOR) continue;
             const bi = by * bw + Math.min(bw - 1, (x / BAND_DOWN) | 0);
             const wl = sp.wl[i];
             if (wl < 0) {
@@ -262,7 +268,7 @@ export function measureBands(rgba: Uint8ClampedArray, w: number, h: number, nBan
         lut.push(tintLut(hx, hy));
         meanPurity.push(lsums[k] > 0 ? Math.min(1, sums[k] / lsums[k]) : 0);
     }
-    const m: BandMeasure = { n, bw, bh, maps, lum, member, mw: w, sums, lsums, hue, lut, meanPurity, centre, active: sums.map(t => t > EMPTY_BAND * total), total };
+    const m: BandMeasure = { n, bw, bh, maps, lum, mw: w, mh: h, sums, lsums, hue, lut, meanPurity, centre, active: sums.map(t => t > EMPTY_BAND * total), total };
     byN.set(n, m);
     measureCache.set(rgba, byN);
     return m;
@@ -278,7 +284,23 @@ export function buildBands(m: BandMeasure, sigma: number): BandSet {
     // that hardly exists in the picture stays faint instead of being stretched to full strength.
     const maxE = new Float32Array(bw * bh);
     for (const t of tensors) if (t) for (let i = 0; i < maxE.length; i++) if (t.energy[i] > maxE[i]) maxE[i] = t.energy[i];
-    const scale = percentile(maxE, BAND_SCALE_P);
+    const scale = BAND_MEDIAN_MULTIPLE * percentile(maxE, 0.5);
+
+    // Where each band is present, read at the same scale as the field: the band's weight map blurred with the
+    // SCALE sigma (the very map its gradient is taken from) as a share of all bands' blurred maps. It is kept at the
+    // picture's own resolution so a line is tested at the pixel it is on.
+    const sumSm = new Float32Array(bw * bh);
+    for (const t of tensors) if (t) for (let i = 0; i < sumSm.length; i++) sumSm[i] += t.smooth[i];
+    const presence = (t: { smooth: Float32Array }): Uint8Array => {
+        const small = new Uint8Array(bw * bh);
+        for (let i = 0; i < small.length; i++) small[i] = sumSm[i] >= WEIGHT_FLOOR && t.smooth[i] >= PRESENCE_SHARE * sumSm[i] ? 1 : 0;
+        const full = new Uint8Array(m.mw * m.mh);
+        for (let y = 0; y < m.mh; y++) {
+            const row = Math.min(bh - 1, (y / BAND_DOWN) | 0) * bw;
+            for (let x = 0; x < m.mw; x++) full[y * m.mw + x] = small[row + Math.min(bw - 1, (x / BAND_DOWN) | 0)];
+        }
+        return full;
+    };
 
     const bands: Band[] = [];
     for (let k = 0; k <= n; k++) {
@@ -297,7 +319,7 @@ export function buildBands(m: BandMeasure, sigma: number): BandSet {
             for (let i = 0; i < purity.length; i++) {
                 purity[i] = lumSm[i] > floor ? Math.min(1, tk.smooth[i] / lumSm[i]) : fb;
             }
-            field = fieldFromTensor(tk, bw, bh, s, sigma, scale, { tint: { lut: m.lut[k], purity }, member: m.member[k], memberW: m.mw });
+            field = fieldFromTensor(tk, bw, bh, s, sigma, scale, { tint: { lut: m.lut[k], purity }, member: presence(tk), memberW: m.mw });
             for (let i = 0; i < field.en.length; i++) mass += field.en[i];
         }
         bands.push({ wl: m.centre[k], meanPurity: m.meanPurity[k], mass, field });

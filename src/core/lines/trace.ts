@@ -273,8 +273,8 @@ function flowPass(f: Field, p: LineParams, g: Grid, rng: () => number, out: Buil
         const nf = walk(x0, y0, tx0, ty0, fxs, fys);
         const nb = walk(x0, y0, -tx0, -ty0, bxs, bys);
         const nPts = nf + nb + 1;
-        // A band's line lives only on its own pixels, so its runs are naturally shorter: allow shorter ones.
-        const minPts = Math.max(6, Math.round(14 * p.length * (member ? 0.6 : 1)));
+        // A band's line lives only inside the band's region, so its runs are somewhat shorter than a free line's.
+        const minPts = Math.max(6, Math.round(14 * p.length * (member ? 0.8 : 1)));
         // A seed that cannot make a line is not tried again: its cell is marked unavailable.
         if (nPts < minPts * 0.6) { markDead(x0, y0); continue; }
 

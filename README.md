@@ -30,7 +30,7 @@ SpectraLine turns a picture into line art. Open a picture, or try one of the thr
 
 ## About PRISM
 
-PRISM's colours are CIE dominant wavelengths computed from the picture's RGB values: for each pixel, the dominant wavelength and the excitation purity of its colour (sRGB, D65 white point, CIE 1931 2-degree observer). The picture is split into wavelength bands and each band is drawn in its own hue at the purity measured at that point. Purple colours have no dominant wavelength, so they get their own band.
+PRISM's colours are CIE dominant wavelengths computed from the picture's RGB values: for each pixel, the dominant wavelength and the excitation purity of its colour (sRGB, D65 white point, CIE 1931 2-degree observer). The picture is split into wavelength bands and each band is drawn in its own hue at the purity measured at that point. Purple colours have no dominant wavelength, so they get their own band. Pixels too dark or too grey for their colour to be measured (purity times luminance under 0.005, where one step of the 8-bit value moves the wavelength by more than half a band) are left out of the spectrum.
 
 A photograph does not contain the physical spectrum of the light it shows; it holds three numbers per pixel. **SpectraLine does not claim to recover the real spectrum.** PRISM shows what the colours of the picture are, as wavelengths.
 

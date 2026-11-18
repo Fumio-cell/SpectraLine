@@ -24,7 +24,7 @@ export interface Field {
     ty: Float32Array;
     /** Anisotropy of the structure tensor, 0 (no direction) .. 1 (pure edge). */
     coh: Float32Array;
-    /** Structure strength 0..1 (RMS gradient energy, normalised to its 98th percentile). */
+    /** Structure strength 0..1 (RMS gradient energy, normalised by a multiple of its median at this reading scale). */
     str: Float32Array;
     /**
      * Energy 0..1: strength gated by coherence. This is the one number that decides how
@@ -277,11 +277,26 @@ export function structure(map: Float32Array, w: number, h: number, s: number, si
     return { smooth: gl, tx, ty, coh, energy };
 }
 
-/** Gradient energy is normalised to 0..1 at this percentile of the picture: the top few percent saturate. */
-export const ENERGY_PERCENTILE = Number(0.92);
+/**
+ * Gradient energy is normalised at the scale it was read, by a multiple of its own median.
+ *
+ * A high percentile (the SL-1 choice, the 92nd) is blind to how the distribution changes with the reading
+ * scale: read finely, the energy has a heavy tail (a few sharp edges, the rest nearly flat), so the 92nd
+ * percentile sits far above the typical pixel and most of the picture comes out dim; read broadly the
+ * distribution is compressed and the same percentile sits close to the typical pixel. Measured on the five
+ * samples the median is 0.21..0.47 of the 92nd percentile at the fine end and 0.42..0.66 at the broad end.
+ * The median is the typical level itself and, unlike the mean, does not follow the tail, so dividing by a
+ * fixed multiple of it gives the typical pixel the same strength at every scale (mean energy of the drawing
+ * across the four scales 0, .35, .7, 1 on sample-4: 0.35 / 0.40 / 0.41 / 0.34, against 0.22 / 0.33 / 0.45 /
+ * 0.50 with the percentile). The multiple is the one that reproduces SL-4's normaliser on average at the
+ * default scale (mean over the five samples of p92 / median = 2.36), so the default position stays close to where it was.
+ * It is one divisor per picture and scale: the order of strengths within the picture is untouched, and
+ * nothing is added.
+ */
+export const ENERGY_MEDIAN_MULTIPLE = 2.36;
 
 export function energyScale(energy: Float32Array): number {
-    return percentile(energy, ENERGY_PERCENTILE);
+    return ENERGY_MEDIAN_MULTIPLE * percentile(energy, 0.5);
 }
 
 /** Build a Field from a tensor and a normaliser (shared between bands so they stay comparable). */
