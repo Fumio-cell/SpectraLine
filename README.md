@@ -42,11 +42,11 @@ npm install
 npm run dev
 ```
 
-`npm run build` makes the full version; `npm run build:demo` makes the free preview (exports capped at 1024 px, with a watermark).
+`npm run build` makes the one build that serves everyone. It starts as the free preview (exports capped at 1024 px, with a watermark); a license key entered under **Unlock** in the header turns it into the full version, at run time. `npm run build:demo` produces the same bundle.
 
 ## Notes
 
 - The sample picture is credited to its author: Sample image by Miho Morita.
-- Interface fonts (Archivo, IBM Plex Mono) are self-hosted under the SIL Open Font License; see `src/fonts/OFL.txt`. The page makes no request to any other host.
+- Interface fonts (Archivo, IBM Plex Mono) are self-hosted under the SIL Open Font License; see `src/fonts/OFL.txt`. The page makes no request to any other host, except to Lemon Squeezy, our payment provider, when a license key is activated, deactivated or re-checked (about once a week): that request carries the key, never a picture.
 
 *Part of the Poetic Signal Toolkit*

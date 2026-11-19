@@ -7,7 +7,8 @@ import { videoDims } from './lines/motion';
 /** Long edge of the on-screen drawing. */
 export const PREVIEW_EDGE = 1024;
 import { demoWatermarkMask, downloadBlob } from './export';
-import { DEMO_MODE, DEMO_MAX_EDGE } from '../config';
+import { DEMO_MAX_EDGE } from '../config';
+import { useLicense } from '../lib/license';
 
 export interface ExportResult {
     width: number;
@@ -204,18 +205,19 @@ export class AppEngine {
 
     /**
      * Render the clip in the worker (30 fps, H.264, no sound) and download it. HD and 4K are sized by the short side;
-     * the demo build is 1024 px on the long side, with the watermark.
+     * the free preview is 1024 px on the long side, with the watermark.
      */
     public async exportMP4(params: Params, size: VideoSize, filename: (size: { width: number; height: number }) => string, onProgress?: (done: number, total: number) => void, bitrate?: number): Promise<ExportResult> {
         await this.sourcePromise;
         if (!this.origW) throw new Error('No image loaded for export.');
         const id = `mp4_${++this.seq}`;
+        const demo = !useLicense.getState().unlocked;
         const { width, height } = this.videoSize(size);
         return new Promise<ExportResult>((resolve, reject) => {
             this.pendingExports.set(id, { filename: filename({ width, height }), resolve, reject, onProgress });
             this.send({
                 type: 'EXPORT_MP4', requestId: id, lines: params.lines, motion: params.motion, size, bitrate,
-                watermark: DEMO_MODE ? demoWatermarkMask(width, height) : undefined
+                watermark: demo ? demoWatermarkMask(width, height) : undefined
             });
         });
     }
@@ -247,14 +249,15 @@ export class AppEngine {
     public async exportPNG(params: Params, filename: (size: { width: number; height: number }) => string): Promise<ExportResult> {
         await this.sourcePromise;
         if (!this.origW) throw new Error('No image loaded for export.');
-        const edge = DEMO_MODE ? Math.min(params.export.edge, DEMO_MAX_EDGE) : params.export.edge;
+        const demo = !useLicense.getState().unlocked;
+        const edge = demo ? Math.min(params.export.edge, DEMO_MAX_EDGE) : params.export.edge;
         const { w, h } = sizeForEdge(this.origW, this.origH, edge);
         const id = `png_${++this.seq}`;
         return new Promise<ExportResult>((resolve, reject) => {
             this.pendingExports.set(id, { filename: filename({ width: w, height: h }), resolve, reject });
             this.send({
                 type: 'EXPORT_PNG', requestId: id, lines: params.lines, outW: w, outH: h,
-                watermark: DEMO_MODE ? demoWatermarkMask(w, h) : undefined
+                watermark: demo ? demoWatermarkMask(w, h) : undefined
             });
         });
     }

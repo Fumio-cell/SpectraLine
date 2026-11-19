@@ -5,7 +5,8 @@ import Stage from './components/Stage';
 import { AppEngine } from './core/engine';
 import { openImage } from './core/input';
 import { useAppStore, LOOKS } from './store/useAppStore';
-import { DEMO_MODE } from './config';
+import LicenseDialog from './components/LicenseDialog';
+import { useLicense, clearLicenseError } from './lib/license';
 
 const ACCEPT = 'image/png,image/jpeg,image/webp';
 
@@ -13,7 +14,11 @@ export default function App() {
     const hasImage = useAppStore(s => !!s.input.file);
     const notice = useAppStore(s => s.notice);
     const [engine, setEngine] = useState<AppEngine | null>(null);
+    const unlocked = useLicense(s => s.unlocked);
     const [demoLimited, setDemoLimited] = useState(false);
+    const [licenseOpen, setLicenseOpen] = useState(false);
+    const licenseBtnRef = useRef<HTMLButtonElement>(null);
+    const licenseWasOpen = useRef(false);
     const [dragging, setDragging] = useState(false);
     const fileRef = useRef<HTMLInputElement>(null);
 
@@ -33,7 +38,7 @@ export default function App() {
         st.setExporting(true);
         try {
             await engine.exportPNG(st.params, ({ width, height }) => `spectraline-${look.slug}-${Math.max(width, height)}.png`);
-            if (DEMO_MODE) setDemoLimited(true);
+            if (!useLicense.getState().unlocked) setDemoLimited(true);
         } catch (err: unknown) {
             useAppStore.getState().setNotice(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
         } finally {
@@ -46,8 +51,8 @@ export default function App() {
         if (!engine || !st.input.file || st.isExporting) return;
         const look = LOOKS.find(l => l.presetId === st.activeLookId) ?? LOOKS[0];
         const { mode, length } = st.params.motion;
-        // The demo build exports 1024 px on the long side, MP4 only; the full build HD or 4K.
-        const size = DEMO_MODE ? 'demo' as const : st.videoSize;
+        // The free preview exports 1024 px on the long side, MP4 only; the full version HD or 4K.
+        const size = useLicense.getState().unlocked ? st.videoSize : 'demo' as const;
         const tag = size === 'demo' ? '1024' : size === 'uhd' ? '4k' : 'hd';
         st.setExporting(true);
         st.setExportKind(kind);
@@ -64,6 +69,15 @@ export default function App() {
             useAppStore.getState().setExporting(false);
         }
     }, [engine]);
+
+    const openLicense = useCallback(() => { clearLicenseError(); setLicenseOpen(true); }, []);
+    const closeLicense = useCallback(() => setLicenseOpen(false), []);
+
+    // When the dialog closes, focus goes back to the button that opened it (after the page is no longer inert).
+    useEffect(() => {
+        if (licenseWasOpen.current && !licenseOpen) licenseBtnRef.current?.focus();
+        licenseWasOpen.current = licenseOpen;
+    }, [licenseOpen]);
 
     // Drop a picture anywhere.
     useEffect(() => {
@@ -86,7 +100,8 @@ export default function App() {
     }, []);
 
     return (
-        <div className="app">
+        <>
+        <div className="app" inert={licenseOpen}>
             <input ref={fileRef} type="file" accept={ACCEPT} hidden aria-label="Open a picture" onChange={onPicked} />
 
             {hasImage ? (
@@ -94,7 +109,8 @@ export default function App() {
                     <header className="signal-header app-bar">
                         <h1 className="display">SpectraLine</h1>
                         <div className="app-bar-actions">
-                            {DEMO_MODE && <span className="control badge">Free preview</span>}
+                            <span className="control badge">{unlocked ? 'Full version' : 'Free preview'}</span>
+                            <button type="button" className="btn" ref={licenseBtnRef} onClick={openLicense}>{unlocked ? 'License' : 'Unlock'}</button>
                             <button type="button" className="btn" onClick={openPicker}>Open another picture</button>
                         </div>
                     </header>
@@ -120,5 +136,7 @@ export default function App() {
                 </div>
             )}
         </div>
+        {licenseOpen && <LicenseDialog onClose={closeLicense} />}
+        </>
     );
 }

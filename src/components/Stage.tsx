@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore, LOOKS } from '../store/useAppStore';
 import { AppEngine } from '../core/engine';
 import { SAMPLES, SAMPLE_CREDIT } from '../core/input';
-import { DEMO_MODE, DEMO_MAX_EDGE, BUY_URL } from '../config';
+import { DEMO_MAX_EDGE } from '../config';
+import { useLicense, CHECKOUT_URL } from '../lib/license';
 
 type View = 'drawing' | 'original' | 'compare';
 
@@ -21,6 +22,7 @@ interface StageProps {
 }
 
 export default function Stage({ onEngineReady, demoLimited }: StageProps) {
+    const unlocked = useLicense(s => s.unlocked);
     const [view, setView] = useState<View>('drawing');
 
     const input = useAppStore(s => s.input);
@@ -197,9 +199,9 @@ export default function Stage({ onEngineReady, demoLimited }: StageProps) {
                         physical light spectrum, and SpectraLine does not claim to recover it.
                     </p>
                 )}
-                {DEMO_MODE && demoLimited && (
+                {!unlocked && demoLimited && (
                     <p className="note" role="status">
-                        Demo export: {DEMO_MAX_EDGE} px with a watermark. <a href={BUY_URL} target="_blank" rel="noopener noreferrer">Get the full version</a>
+                        Demo export: {DEMO_MAX_EDGE} px with a watermark. <a href={CHECKOUT_URL} target="_blank" rel="noopener noreferrer">Get the full version</a>
                     </p>
                 )}
                 {sample && <p className="note">{SAMPLE_CREDIT}</p>}

@@ -4,6 +4,9 @@ import './fonts.css'
 import './styles/signal.css'
 import './index.css'
 import App from './App.tsx'
+import { initLicense } from './lib/license'
+
+void initLicense()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -1,5 +1,6 @@
 import { useAppStore, LOOKS } from '../store/useAppStore';
-import { DEMO_MODE, DEMO_MAX_EDGE } from '../config';
+import { DEMO_MAX_EDGE } from '../config';
+import { useLicense } from '../lib/license';
 import type { ExportEdge, MotionMode } from '../core/types';
 import { FRAMES_UHD_MAX_SECONDS, LENGTH_MAX, LENGTH_MIN } from '../core/lines/motion';
 import type { SpectrumCell } from '../core/lines/spectrum';
@@ -21,6 +22,7 @@ function cellName(cell: SpectrumCell): string {
 }
 
 export default function Controls({ onExport, onExportVideo }: ControlsProps) {
+    const locked = !useLicense(s => s.unlocked);
     const lines = useAppStore(s => s.params.lines);
     const exportEdge = useAppStore(s => s.params.export.edge);
     const activeLookId = useAppStore(s => s.activeLookId);
@@ -41,7 +43,7 @@ export default function Controls({ onExport, onExportVideo }: ControlsProps) {
     const isPrism = lines.mode === 'spectrum';
     const moving = motion.mode !== 'still';
     const exportingVideo = exportProgress !== null;
-    const framesTooLong = !DEMO_MODE && videoSize === 'uhd' && motion.length > FRAMES_UHD_MAX_SECONDS;
+    const framesTooLong = !locked && videoSize === 'uhd' && motion.length > FRAMES_UHD_MAX_SECONDS;
     const pct = `${Math.round((exportProgress ?? 0) * 100)} %`;
     const solo = lines.solo;
     const tallest = spectrum ? Math.max(...spectrum.map(c => c.share), 1e-9) : 1;
@@ -184,19 +186,19 @@ export default function Controls({ onExport, onExportVideo }: ControlsProps) {
                     <label className="field-label" htmlFor="export-size">Size</label>
                     <select
                         id="export-size" className="field"
-                        value={DEMO_MODE ? 1024 : exportEdge}
-                        aria-describedby={DEMO_MODE ? 'export-note' : undefined}
+                        value={locked ? 1024 : exportEdge}
+                        aria-describedby={locked ? 'export-note' : undefined}
                         onChange={e => updateExport({ edge: parseInt(e.target.value) as ExportEdge })}
                     >
                         <option value="1024">1024 px, longest side</option>
-                        <option value="2048" disabled={DEMO_MODE}>2048 px, longest side</option>
-                        <option value="4096" disabled={DEMO_MODE}>4096 px, longest side</option>
+                        <option value="2048" disabled={locked}>2048 px, longest side</option>
+                        <option value="4096" disabled={locked}>4096 px, longest side</option>
                     </select>
-                    {DEMO_MODE && <p className="note" id="export-note">{`Demo: ${DEMO_MAX_EDGE} px, with a watermark.`}</p>}
+                    {locked && <p className="note" id="export-note">{`Demo: ${DEMO_MAX_EDGE} px, with a watermark.`}</p>}
                 </div>}
                 {moving && (
                     <>
-                        {DEMO_MODE ? (
+                        {locked ? (
                             <p className="note" id="video-note">Demo: MP4, 1024 px, with a watermark. 4K and PNG sequence are in the full version.</p>
                         ) : (
                             <div className="field-group inline video-size">
@@ -223,7 +225,7 @@ export default function Controls({ onExport, onExportVideo }: ControlsProps) {
                             {exportingVideo && exportKind === 'mp4' ? `Exporting ${pct}` : 'Export MP4'}
                         </button>
                         <div className="field-row">
-                            {!DEMO_MODE && (
+                            {!locked && (
                                 <button
                                     type="button"
                                     className="btn"

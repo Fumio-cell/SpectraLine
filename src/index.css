@@ -208,3 +208,12 @@ a { color: var(--paper); text-underline-offset: 3px; }
     .strip-note { display: none; }
     .motion-note { display: none; }
 }
+
+/* ---- license dialog ---------------------------------------------------------------------------- */
+.license-dialog { max-width: 440px; display: flex; flex-direction: column; gap: var(--space-4); }
+.license-dialog p, .license-dialog form { margin: 0; }
+.license-dialog form { display: flex; flex-direction: column; gap: var(--space-4); }
+.license-dialog .notice { max-width: none; padding: var(--space-2) var(--space-3); }
+.license-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.license-actions .btn, .license-actions .btn-fill { text-decoration: none; }
+.license-actions .btn-fill[aria-disabled='true'] { cursor: progress; }
