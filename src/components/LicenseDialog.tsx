@@ -69,7 +69,7 @@ export default function LicenseDialog({ onClose }: LicenseDialogProps) {
 
                 {!unlocked && (
                     <p className="note">
-                        Your images never leave your computer. To check a key, the app sends only the key to Lemon Squeezy, our payment provider.
+                        Your images never leave your computer. To check a key, the app sends the key and a name for this browser to Lemon Squeezy, our payment provider.
                     </p>
                 )}
 
